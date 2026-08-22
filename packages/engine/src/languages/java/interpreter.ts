@@ -220,6 +220,7 @@ export class JavaInterpreter {
         klassName: className,
         methodName: method.name,
         frameId: frame.frameId,
+        operationType: method.isStatic ? 'invokestatic' : 'invokevirtual',
       },
     });
 
@@ -281,6 +282,7 @@ export class JavaInterpreter {
         klassName: className,
         methodName: '<init>',
         frameId: frame.frameId,
+        operationType: 'invokespecial',
       },
     });
 
@@ -604,6 +606,7 @@ export class JavaInterpreter {
         klassName: implClass,
         methodName: methodName,
         frameId: frame.frameId,
+        operationType: 'invokevirtual',
       },
     });
 
@@ -1181,7 +1184,12 @@ export class JavaInterpreter {
       const dot   = key.lastIndexOf('.');
       const declaredIn = dot >= 0 ? key.slice(0, dot) : obj.klassName;
       const name  = dot >= 0 ? key.slice(dot + 1) : key;
-      result.push({ name, declaredIn, value });
+      // Look up isVolatile from the declaring class's field declarations
+      const decl      = this.loaded.decls.get(declaredIn);
+      const fieldDecl = decl?.fields.find(f => f.name === name && !f.isStatic);
+      const slot: import('../../types.js').FieldSlot = { name, declaredIn, value };
+      if (fieldDecl?.isVolatile) slot.isVolatile = true;
+      result.push(slot);
     }
     return result;
   }

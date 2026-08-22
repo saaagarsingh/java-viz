@@ -31,6 +31,8 @@ function arrowStyle(op: OperationType): {
     case 'invokespecial':
       return { stroke: '#CBD5E1', markerEnd: 'url(#arrow-open)' };
     case 'klass_pointer_follow':
+      // Klass pointer: muted dashed — heap obj → Metaspace class.
+      return { stroke: '#94A3B8', strokeDasharray: '5 3', markerEnd: 'url(#arrow-klass)' };
     case 'vtable_lookup':
     case 'itable_lookup':
       return { stroke: '#94A3B8', strokeDasharray: '4 3', markerEnd: 'url(#arrow-open)' };
@@ -198,6 +200,10 @@ export function ArrowOverlay({ arrows, fadingArrows, containerRef }: Props) {
         <marker id="arrow-write" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
           <path d="M0,0 L8,3 L0,6 Z" fill="#D97706" />
         </marker>
+        {/* Klass pointer arrowhead — matches the muted arrow-open style */}
+        <marker id="arrow-klass" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L8,3 L0,6" fill="none" stroke="#94A3B8" strokeWidth="1.5" />
+        </marker>
       </defs>
 
       {computed.map(a => {
@@ -236,19 +242,32 @@ export function ArrowOverlay({ arrows, fadingArrows, containerRef }: Props) {
               strokeDasharray={style.strokeDasharray}
               markerEnd={style.markerEnd}
             />
-            {a.label && (
-              <text
-                x={cpx}
-                y={cpy - 6}
-                fill={style.stroke}
-                fontSize={10}
-                fontFamily="var(--font-mono)"
-                textAnchor="middle"
-                style={{ pointerEvents: 'none', userSelect: 'none' }}
-              >
-                {a.label}
-              </text>
-            )}
+            {(a.operation === 'klass_pointer_follow' || a.label) && (() => {
+              const labelText = a.operation === 'klass_pointer_follow' ? 'klass ptr' : a.label!;
+              const labelColor = '#CBD5E1'; // always light — readable on dark bg, not distracting
+              const pillW = labelText.length * 7 + 12;
+              const pillH = 15;
+              return (
+                <>
+                  <rect
+                    x={cpx - pillW / 2} y={cpy - pillH / 2 - 6}
+                    width={pillW} height={pillH} rx={pillH / 2}
+                    fill="#0F172A" opacity={0.75}
+                  />
+                  <text
+                    x={cpx} y={cpy - 2}
+                    fill={labelColor}
+                    fontSize={10}
+                    fontFamily="var(--font-mono)"
+                    fontWeight="500"
+                    textAnchor="middle"
+                    style={{ pointerEvents: 'none', userSelect: 'none' }}
+                  >
+                    {labelText}
+                  </text>
+                </>
+              );
+            })()}
           </g>
         );
       })}

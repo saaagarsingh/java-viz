@@ -1,6 +1,9 @@
 export type {
   PrimitiveValue,
   Value,
+  MarkWordState,
+  MonitorState,
+  ThreadStatus,
   LocalVar,
   StackFrame,
   FieldSlot,
@@ -13,6 +16,8 @@ export type {
   ArrowEndpoint,
   Arrow,
   HighlightTarget,
+  MonitorOperation,
+  MethodInvocation,
   Delta,
   Step,
 } from './types.js';

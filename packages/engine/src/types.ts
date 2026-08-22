@@ -62,6 +62,7 @@ export interface FieldSlot {
   name:       string;
   declaredIn: string;  // class that declared this field (needed for inherited fields)
   value:      Value;
+  isVolatile?: boolean; // true if field was declared volatile
 }
 
 export interface HeapObject {
@@ -155,9 +156,10 @@ export interface MonitorOperation {
 }
 
 export interface MethodInvocation {
-  klassName:  string;   // Metaspace class where method lives
-  methodName: string;
-  frameId:    string;   // newly created stack frame
+  klassName:     string;        // Metaspace class where method lives
+  methodName:    string;
+  frameId:       string;        // newly created stack frame
+  operationType: OperationType; // invokevirtual | invokestatic | invokespecial | invokeinterface
 }
 
 export interface Delta {

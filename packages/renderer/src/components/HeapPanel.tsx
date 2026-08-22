@@ -1,11 +1,35 @@
 import { useState } from 'react';
-import type { HeapObject, HighlightTarget, Arrow } from '@jvm-viz/engine';
+import type { HeapObject, HighlightTarget, Arrow, MarkWordState } from '@jvm-viz/engine';
 import { formatValue } from '../utils/formatValue.js';
 
 interface Props {
-  objects:    HeapObject[];
-  highlights: HighlightTarget[];
-  arrows:     Arrow[];
+  objects:         HeapObject[];
+  highlights:      HighlightTarget[];
+  arrows:          Arrow[];
+  monitorObjectId?: string; // objectId that was just locked/unlocked this step
+}
+
+/** Render lock badge for a heap object's markWord state */
+function LockBadge({ markWord, justChanged }: { markWord: MarkWordState | undefined; justChanged: boolean }) {
+  if (!markWord || markWord === 'unlocked') {
+    // No badge when unlocked — absence of badge == unlocked is intuitive
+    return null;
+  }
+  const threadId = typeof markWord === 'object' ? markWord.threadId : '';
+  const isFat    = typeof markWord === 'object' && markWord.kind === 'fat-locked';
+  return (
+    <span
+      className={`lock-badge${isFat ? ' lock-badge--fat' : ' lock-badge--thin'}${justChanged ? ' lock-badge--pulse' : ''}`}
+      title={`${isFat ? 'fat' : 'thin'}-locked by ${threadId}`}
+      aria-label={`Locked by ${threadId}`}
+    >
+      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+        <rect x="2" y="5" width="8" height="6" rx="1" fill="currentColor" />
+        <path d="M3.5 5V3.5a2.5 2.5 0 0 1 5 0V5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+      <span className="lock-badge__thread">{threadId}</span>
+    </span>
+  );
 }
 
 function isHighlighted(highlights: HighlightTarget[], objectId: string, field?: string): boolean {
@@ -26,7 +50,7 @@ function activeHeapIds(arrows: Arrow[], highlights: HighlightTarget[]): Set<stri
   return ids;
 }
 
-export function HeapPanel({ objects, highlights, arrows }: Props) {
+export function HeapPanel({ objects, highlights, arrows, monitorObjectId }: Props) {
   const [openOverrides, setOpenOverrides] = useState<Record<string, boolean>>({});
 
   if (objects.length === 0) {
@@ -62,9 +86,15 @@ export function HeapPanel({ objects, highlights, arrows }: Props) {
               aria-expanded={expanded}
               aria-label={`${expanded ? 'Collapse' : 'Expand'} ${obj.objectId}`}
             >
-              <span className="heap-card__klass">{obj.klassName}</span>
+              <span className="heap-card__klass">
+                {obj.klassName}
+                <span className="heap-card__id">#{obj.objectId.replace(/^obj-/, '')}</span>
+              </span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span className="heap-card__id">{obj.objectId}</span>
+                <LockBadge
+                  markWord={obj.markWord}
+                  justChanged={obj.objectId === monitorObjectId}
+                />
                 <span className={`klass-card__chevron${expanded ? ' klass-card__chevron--open' : ''}`}>
                   ›
                 </span>
@@ -83,6 +113,11 @@ export function HeapPanel({ objects, highlights, arrows }: Props) {
                       className={`field-row${fieldHighlighted ? ' is-highlighted-field' : ''}`}
                     >
                       <span className="field-row__name">
+                        {field.isVolatile && (
+                          <span className="volatile-badge" title="volatile — always read from/written to main memory">
+                            volatile
+                          </span>
+                        )}
                         {field.name}
                         {field.declaredIn !== obj.klassName && (
                           <span style={{ color: 'var(--text-muted)', fontSize: '10px', marginLeft: 4 }}>

@@ -156,7 +156,12 @@ export function App() {
             <div className="region-panel__body">
               {noStep
                 ? <p className="empty-state">{status === 'running' ? '⏳ running…' : status === 'error' ? '⚠ error — see step info' : 'no trace'}</p>
-                : <StackPanel frames={step.stack} highlights={highlights} />}
+                : <StackPanel
+                    frames={step.stack}
+                    highlights={highlights}
+                    heap={step.heap}
+                    {...(step.threadStates ? { threadStates: step.threadStates } : {})}
+                  />}
             </div>
           </section>
 
@@ -170,7 +175,12 @@ export function App() {
             <div className="region-panel__body">
               {noStep
                 ? <p className="empty-state">&nbsp;</p>
-                : <HeapPanel objects={step.heap} highlights={highlights} arrows={step.arrows} />}
+                : <HeapPanel
+                    objects={step.heap}
+                    highlights={highlights}
+                    arrows={step.arrows}
+                    {...(step.delta?.monitorOperation ? { monitorObjectId: step.delta.monitorOperation.objectId } : {})}
+                  />}
             </div>
           </section>
 

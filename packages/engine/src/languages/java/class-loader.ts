@@ -229,6 +229,7 @@ function buildStaticFieldDefaults(fields: FieldDecl[]): FieldSlot[] {
     name:       f.name,
     declaredIn: (f as any).__className ?? 'Unknown',  // set by caller when available
     value:      defaultValue(f.type),
+    ...(f.isVolatile ? { isVolatile: true } : {}),
   }));
 }
 
