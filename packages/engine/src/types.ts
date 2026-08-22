@@ -58,6 +58,7 @@ export interface HeapObject {
 export interface VTableSlot {
   slot:          number;
   methodName:    string;
+  arity:         number;  // param count — distinguishes overloaded methods
   descriptor:    string;
   implementedBy: string;  // concrete class providing this impl
 }

@@ -27,9 +27,9 @@ import type { KlassInfo, VTableSlot, ITableEntry, FieldSlot, Value } from '../..
 // ── Object's built-in vtable slots (every class inherits these) ───────────────
 
 const OBJECT_VTABLE: VTableSlot[] = [
-  { slot: 0, methodName: 'toString',  descriptor: '()Ljava/lang/String;', implementedBy: 'Object' },
-  { slot: 1, methodName: 'equals',    descriptor: '(Ljava/lang/Object;)Z', implementedBy: 'Object' },
-  { slot: 2, methodName: 'hashCode',  descriptor: '()I',                   implementedBy: 'Object' },
+  { slot: 0, methodName: 'toString',  arity: 0, descriptor: '()Ljava/lang/String;', implementedBy: 'Object' },
+  { slot: 1, methodName: 'equals',    arity: 1, descriptor: '(Ljava/lang/Object;)Z', implementedBy: 'Object' },
+  { slot: 2, methodName: 'hashCode',  arity: 0, descriptor: '()I',                   implementedBy: 'Object' },
 ];
 
 export class ClassLoadError extends Error {
@@ -137,22 +137,25 @@ function buildVTable(decl: ClassDecl, superKlass: KlassInfo | null): VTableSlot[
   const instanceMethods = decl.methods.filter(m => !m.isStatic && !m.isAbstract);
   for (const method of instanceMethods) {
     const descriptor = buildDescriptor(method);
-    const existing   = base.findIndex(s => s.methodName === method.name);
+    const arity      = method.params.length;
+    // Match by name AND arity so overloads are independent slots
+    const existing   = base.findIndex(s => s.methodName === method.name && s.arity === arity);
     if (existing >= 0) {
       // Override: same slot, updated implementedBy
       base[existing] = { ...base[existing]!, implementedBy: decl.name };
     } else {
-      // New virtual method: append at next slot
-      base.push({ slot: base.length, methodName: method.name, descriptor, implementedBy: decl.name });
+      // New virtual method or new overload: append at next slot
+      base.push({ slot: base.length, methodName: method.name, arity, descriptor, implementedBy: decl.name });
     }
   }
 
   // Abstract methods from this class (if abstract class) — add slot but implementedBy stays abstract marker
   if (decl.isAbstract) {
     for (const method of decl.methods.filter(m => m.isAbstract)) {
-      const existing = base.findIndex(s => s.methodName === method.name);
+      const arity    = method.params.length;
+      const existing = base.findIndex(s => s.methodName === method.name && s.arity === arity);
       if (existing < 0) {
-        base.push({ slot: base.length, methodName: method.name, descriptor: buildDescriptor(method), implementedBy: `<abstract:${decl.name}>` });
+        base.push({ slot: base.length, methodName: method.name, arity, descriptor: buildDescriptor(method), implementedBy: `<abstract:${decl.name}>` });
       }
     }
   }
@@ -186,10 +189,10 @@ function buildITable(decl: ClassDecl, loaded: Map<string, KlassInfo>): ITableEnt
 
     const ifaceMethods = getInterfaceMethods(ifaceName, loaded);
     let slot = 0;
-    for (const [methodName, descriptor] of ifaceMethods) {
+    for (const [methodName, descriptor, arity] of ifaceMethods) {
       // Find which class in this hierarchy implements this method
-      const implementor = findImplementor(methodName, decl.name, loaded);
-      slots.push({ slot, methodName, descriptor, implementedBy: implementor });
+      const implementor = findImplementor(methodName, arity, decl.name, loaded);
+      slots.push({ slot, methodName, arity, descriptor, implementedBy: implementor });
       slot++;
     }
 
@@ -201,19 +204,17 @@ function buildITable(decl: ClassDecl, loaded: Map<string, KlassInfo>): ITableEnt
   return entries;
 }
 
-function getInterfaceMethods(ifaceName: string, loaded: Map<string, KlassInfo>): Array<[string, string]> {
+function getInterfaceMethods(ifaceName: string, loaded: Map<string, KlassInfo>): Array<[string, string, number]> {
   const iface = loaded.get(ifaceName);
   if (!iface) return [];
-  // Interface vtable is empty, but we stored abstract methods via the vtable builder
-  // The vtable of an interface class is empty — we have to rely on the program ClassDecl.
-  // For now return empty; the interpreter fills itable lazily.
+  // Interface vtable is empty — itable is filled lazily by the interpreter.
   return [];
 }
 
-function findImplementor(methodName: string, className: string, loaded: Map<string, KlassInfo>): string {
+function findImplementor(methodName: string, arity: number, className: string, loaded: Map<string, KlassInfo>): string {
   let current: KlassInfo | undefined = loaded.get(className);
   while (current) {
-    const slot = current.vtable.find(s => s.methodName === methodName);
+    const slot = current.vtable.find(s => s.methodName === methodName && s.arity === arity);
     if (slot && !slot.implementedBy.startsWith('<abstract:')) return slot.implementedBy;
     if (!current.superKlassName || current.superKlassName === 'Object') break;
     current = loaded.get(current.superKlassName);

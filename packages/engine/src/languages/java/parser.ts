@@ -20,6 +20,7 @@ import type {
   Program, ClassDecl, FieldDecl, ConstructorDecl, MethodDecl, ParamDecl,
   Statement, Expr, JavaType, SourceLoc,
   LocalVarDecl, ExprStmt, ReturnStmt, IfStmt, ForStmt, WhileStmt,
+  BreakStmt, ContinueStmt,
   BinaryOp, UnaryOp,
   VarExpr, FieldAccessExpr, StaticFieldAccessExpr,
 } from './ast.js';
@@ -505,7 +506,8 @@ function transformStatement(stmt: any): Statement {
     const tryS = child(swts, 'tryStatement');
     const empty= child(swts, 'emptyStatement');
 
-    if (brk || cont) throw new UnsupportedError('break/continue (Phase 1.5)', loc(swts).line);
+    if (brk)  return { kind: 'BreakStmt',    loc: loc(brk)  } satisfies BreakStmt;
+    if (cont) return { kind: 'ContinueStmt', loc: loc(cont) } satisfies ContinueStmt;
     if (thr)         throw new UnsupportedError('throw statements (Phase 4)', loc(swts).line);
     if (sw)          throw new UnsupportedError('switch statements', loc(swts).line);
     if (sync)        throw new UnsupportedError('synchronized blocks (Phase 2)', loc(sync).line);
@@ -630,7 +632,21 @@ function transformExpr(node: any): Expr {
       break;
     }
     case 'conditionalExpression': {
-      if (node.children?.QuestionMark) throw new UnsupportedError('ternary expression', loc(node).line);
+      // Ternary: condition ? then : else
+      if (node.children?.QuestionMark) {
+        const operands: any[] = node.children?.binaryExpression ?? [];
+        // java-parser puts condition in binaryExpression[0], then/else in expression[]
+        const condNode  = operands[0];
+        const branches: any[] = node.children?.expression ?? [];
+        if (!condNode || branches.length < 2) throw new ParseError(`Malformed ternary at line ${loc(node).line}`);
+        return {
+          kind:      'TernaryExpr',
+          condition: transformBinaryExpr(condNode),
+          then:      transformExpr(branches[0]),
+          else_:     transformExpr(branches[1]),
+          loc:       loc(node),
+        };
+      }
       const bin = node.children?.binaryExpression?.[0];
       if (bin) return transformBinaryExpr(bin);
       break;
@@ -699,6 +715,22 @@ function transformBinaryExpr(node: any): Expr {
     const rhs   = transformExpr(rhsNode);
     const opImg = (c.AssignmentOperator[0]?.image as string) ?? '=';
     return buildAssignment(lhs, opImg, rhs, nodeLoc);
+  }
+
+  // ── instanceof: key 'Instanceof' ──────────────────────────────────────────
+  if (c.Instanceof?.length) {
+    // binaryExpression has: unaryExpression (LHS) + Instanceof token + referenceType (RHS class name)
+    const lhsNode = c.unaryExpression?.[0];
+    if (!lhsNode) throw new ParseError(`instanceof without LHS at line ${nodeLoc.line}`);
+    const refType = c.referenceType?.[0] ?? c.classType?.[0];
+    const className = refType ? extractTypeName(refType) : (c.Identifier?.[0]?.image as string | undefined);
+    if (!className) throw new ParseError(`instanceof without type at line ${nodeLoc.line}`);
+    return {
+      kind:      'InstanceofExpr',
+      expr:      transformUnaryExpr(lhsNode),
+      className,
+      loc:       nodeLoc,
+    };
   }
 
   // ── Binary op: key 'BinaryOperator' ─────────────────────────────────────────
@@ -822,9 +854,14 @@ function transformPrimary(node: any): Expr {
     base = transformNewExpr(pc.newExpression[0]);
   } else if (pc.fqnOrRefType) {
     fqnParts = extractFqnParts(pc.fqnOrRefType[0]);
-  } else if (pc.LParen) {
+  } else if (pc.LParen || pc.parenthesisExpression) {
     // Parenthesized expression: ( expr )
-    const inner = pc.expression?.[0];
+    // java-parser wraps parens in a 'parenthesisExpression' rule where the
+    // tokens are named LBrace/RBrace (confusingly). Unwrap the inner expression.
+    const parenNode = pc.parenthesisExpression?.[0];
+    const inner = parenNode
+      ? (parenNode.children?.expression?.[0] ?? parenNode)
+      : pc.expression?.[0];
     if (!inner) throw new ParseError(`Empty parenthesized expression at line ${nodeLoc.line}`);
     base = transformExpr(inner);
   } else if (pc.Super) {

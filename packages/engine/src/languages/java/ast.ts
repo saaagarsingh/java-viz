@@ -98,7 +98,9 @@ export type Statement =
   | IfStmt
   | ForStmt
   | WhileStmt
-  | BlockStmt;
+  | BlockStmt
+  | BreakStmt
+  | ContinueStmt;
 
 export interface LocalVarDecl {
   kind:        'LocalVarDecl';
@@ -150,6 +152,16 @@ export interface BlockStmt {
   loc:        SourceLoc;
 }
 
+export interface BreakStmt {
+  kind: 'BreakStmt';
+  loc:  SourceLoc;
+}
+
+export interface ContinueStmt {
+  kind: 'ContinueStmt';
+  loc:  SourceLoc;
+}
+
 // ── Expressions ──────────────────────────────────────────────────────────────
 
 export type Expr =
@@ -172,6 +184,8 @@ export type Expr =
   | CompoundAssignExpr
   | BinaryExpr
   | UnaryExpr
+  | TernaryExpr
+  | InstanceofExpr
   | PrintlnExpr;        // System.out.println modeled as a first-class expr
 
 export interface IntLiteral    { kind: 'IntLiteral';    value: number;  loc: SourceLoc }
@@ -279,6 +293,27 @@ export interface UnaryExpr {
   operand: Expr;
   prefix:  boolean;   // true = ++x, false = x++
   loc:     SourceLoc;
+}
+
+/** Ternary: condition ? then : else_ */
+export interface TernaryExpr {
+  kind:      'TernaryExpr';
+  condition: Expr;
+  then:      Expr;
+  else_:     Expr;
+  loc:       SourceLoc;
+}
+
+/**
+ * instanceof check: `expr instanceof ClassName`
+ * JVM semantic: resolves the target class in Metaspace and walks
+ * the runtime klass hierarchy. Emits a klass_pointer_follow step.
+ */
+export interface InstanceofExpr {
+  kind:      'InstanceofExpr';
+  expr:      Expr;
+  className: string;
+  loc:       SourceLoc;
 }
 
 /** System.out.println(args) — modeled directly, no classpath needed */
