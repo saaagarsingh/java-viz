@@ -57,6 +57,10 @@ Implementation notes:
   matching: class loading order, static block timing, constructor
   chaining, field defaults before initializers, vtable dispatch,
   itable-style interface dispatch.
+- Before adding any new parser/interpreter feature work, pass the
+  conformance gate in:
+  - `docs/parser-ast-contract.md`
+  - `docs/parser-ast-conformance.md`
 - Cap live object graphs at 3-4 objects on screen for this phase —
   general-purpose graph layout (arbitrary linked lists/trees) is
   explicitly deferred, not solved here.

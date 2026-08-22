@@ -308,7 +308,10 @@ function transformMethodDecl(node: any): MethodDecl {
 
   const declarator = child(header, 'methodDeclarator');
   const name       = tokenImage(declarator, 'Identifier') ?? '';
-  const params     = transformFormalParams(child(declarator, 'formalParameterList'));
+  const isMainEntry = isStatic && name === 'main' && returnType.kind === 'void';
+  const params      = transformFormalParams(child(declarator, 'formalParameterList'), {
+    allowMainStringArrayParam: isMainEntry,
+  });
 
   // Generic type parameters
   if (child(header, 'typeParameters')) throw new UnsupportedError('generic methods', loc(header).line);
@@ -393,23 +396,45 @@ function hasArrayDims(node: any): boolean {
   );
 }
 
-function transformFormalParams(node: any): ParamDecl[] {
+function transformFormalParams(node: any, opts?: { allowMainStringArrayParam?: boolean }): ParamDecl[] {
   if (!node) return [];
+
+  const receiverParam = child(node, 'receiverParameter');
+  if (receiverParam) {
+    throw new UnsupportedError('receiver parameters', loc(receiverParam).line);
+  }
+
   const params: ParamDecl[] = [];
   for (const fp of children(node, 'formalParameter')) {
-    // Silently skip varargs (e.g. String... args) — never used in our subset
-    if (child(fp, 'variableArityParameter')) continue;
+    const varArg = child(fp, 'variableArityParameter');
+    if (varArg) {
+      throw new UnsupportedError('varargs parameters', loc(varArg).line);
+    }
     // java-parser wraps the param in variableParaRegularParameter
     const reg       = child(fp, 'variableParaRegularParameter') ?? fp;
     const unannType = child(reg, 'unannType');
-    // Silently skip array-type params (e.g. String[] args in main) — never populated
-    if (hasArrayDims(unannType)) continue;
+    if (hasArrayDims(unannType)) {
+      const typeName = extractTypeName(unannType);
+      // Phase 1 compatibility exception: accept main(String[] args) by
+      // dropping the arg param because array values are not modeled yet.
+      if (opts?.allowMainStringArrayParam && typeName === 'String') continue;
+      throw new UnsupportedError('array parameters (Phase 5)', loc(unannType ?? reg).line);
+    }
     const type = transformType(unannType);
     const id   = child(reg, 'variableDeclaratorId');
     const name = tokenImage(id, 'Identifier') ?? '';
     params.push({ name, type });
   }
-  // receiverParameter is fine to ignore
+
+  const lastFormal = child(node, 'lastFormalParameter');
+  if (lastFormal) {
+    const varArg = child(lastFormal, 'variableArityParameter');
+    if (varArg) {
+      throw new UnsupportedError('varargs parameters', loc(varArg).line);
+    }
+    throw new UnsupportedError('lastFormalParameter form', loc(lastFormal).line);
+  }
+
   return params;
 }
 

@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useTraceStore, errorSummary } from '../store/trace.store.js';
+import { useTraceStore } from '../store/trace.store.js';
 
 /** Auto-dismisses after 6 seconds. Lives at fixed bottom-right. */
 export function ErrorToast() {
@@ -13,15 +13,11 @@ export function ErrorToast() {
 
   if (!toast) return null;
 
-  // Unsupported features get a distinct contract message in the toast
-  const isUnsupported = toast.kind === 'unsupported_syntax';
-  const message = isUnsupported
-    ? `Not supported: ${toast.feature}${toast.line ? ` (line ${toast.line})` : ''}`
-    : errorSummary(toast);
+  const message = 'Error occurred';
 
   return (
-    <div className={`error-toast${isUnsupported ? ' error-toast--unsupported' : ''}`} role="alert" aria-live="assertive">
-      <span className="error-toast__icon">{isUnsupported ? '⊘' : '⚠'}</span>
+    <div className="error-toast" role="alert" aria-live="assertive">
+      <span className="error-toast__icon">⚠</span>
       <span className="error-toast__message">{message}</span>
       <button
         className="error-toast__close"

@@ -79,8 +79,7 @@ export function App() {
 
   const currentTrace  = traces[exampleIdx];
   const displaySource = mode === 'example' ? (currentTrace?.sourceCode ?? '') : customSource;
-  const isLastStep    = stepIndex === totalSteps - 1;
-  const hasError      = isLastStep && !!execError;
+  const hasError      = status === 'error' && !!execError;
 
   const highlights   = step?.delta?.highlightedElements ?? [];
   const fadingArrows = step?.delta?.fadingArrows ?? [];
@@ -119,7 +118,7 @@ export function App() {
           <span className={`status-banner status-banner--${status}`}>
             {status === 'running' && '⏳ running…'}
             {status === 'done'    && `✓ ${totalSteps} steps`}
-            {status === 'error'   && execError && `⚠ ${errorSummary(execError).slice(0, 60)}`}
+            {status === 'error'   && execError && '⚠ Error occurred'}
           </span>
         )}
 
@@ -233,7 +232,7 @@ export function App() {
           {/* Right header */}
           <div className="code-panel__info-header">
             <span className="code-panel__label">{noStep ? 'ready' : `step ${stepIndex + 1}/${totalSteps}`}</span>
-            <span className="code-panel__step-label">{step?.label ?? (status === 'error' && execError ? errorSummary(execError) : 'paste a program and press ▶ Run')}</span>
+            <span className="code-panel__step-label">{step?.label ?? (status === 'error' && execError ? 'Error occurred' : 'paste a program and press ▶ Run')}</span>
           </div>
 
           {/* Left body */}
