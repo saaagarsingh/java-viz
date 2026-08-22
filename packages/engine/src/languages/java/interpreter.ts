@@ -53,6 +53,9 @@ class ReturnSignal {
   constructor(public readonly value: Value) {}
 }
 
+class BreakSignal    {}
+class ContinueSignal {}
+
 class InterpreterHalt {
   constructor(public readonly error: InterpreterError) {}
 }
@@ -282,7 +285,7 @@ export class JavaInterpreter {
       case 'ForStmt': {
         if (stmt.init) this.executeStatement(stmt.init, stmt.loc.line);
         let iters = 0;
-        while (true) {
+        outer: while (true) {
           if (stmt.condition) {
             const cond = this.evalExpr(stmt.condition);
             if (!this.isTruthy(cond)) break;
@@ -290,7 +293,13 @@ export class JavaInterpreter {
           if (++iters > LIMITS.MAX_LOOP_ITERS) {
             throw new InterpreterHalt({ kind: 'step_limit', limit: LIMITS.MAX_LOOP_ITERS });
           }
-          this.executeStatements(stmt.body, stmt.loc.line);
+          try {
+            this.executeStatements(stmt.body, stmt.loc.line);
+          } catch (e) {
+            if (e instanceof BreakSignal)    break outer;
+            if (e instanceof ContinueSignal) { /* fall through to update */ }
+            else throw e;
+          }
           if (stmt.update) this.evalExpr(stmt.update.expr);
         }
         break;
@@ -303,10 +312,20 @@ export class JavaInterpreter {
           if (++iters > LIMITS.MAX_LOOP_ITERS) {
             throw new InterpreterHalt({ kind: 'step_limit', limit: LIMITS.MAX_LOOP_ITERS });
           }
-          this.executeStatements(stmt.body, stmt.loc.line);
+          try {
+            this.executeStatements(stmt.body, stmt.loc.line);
+          } catch (e) {
+            if (e instanceof BreakSignal)    break;
+            if (e instanceof ContinueSignal) continue;
+            throw e;
+          }
         }
         break;
       }
+      case 'BreakStmt':
+        throw new BreakSignal();
+      case 'ContinueStmt':
+        throw new ContinueSignal();
       case 'BlockStmt':
         this.executeStatements(stmt.statements, stmt.loc.line);
         break;
@@ -354,6 +373,14 @@ export class JavaInterpreter {
 
       case 'UnaryExpr':
         return this.evalUnary(expr);
+
+      case 'TernaryExpr': {
+        const cond = this.evalExpr(expr.condition);
+        return this.isTruthy(cond) ? this.evalExpr(expr.then) : this.evalExpr(expr.else_);
+      }
+
+      case 'InstanceofExpr':
+        return this.evalInstanceof(expr);
 
       case 'NewObjectExpr':
         return this.evalNew(expr);
@@ -456,6 +483,7 @@ export class JavaInterpreter {
   }
 
   private invokeVirtual(runtimeClass: string, methodName: string, receiver: Value, args: Value[], loc: SourceLoc): Value {
+    const arity = args.length;
     // Step 1: klass pointer follow
     this.emitStep(loc.line, {
       operation: 'klass_pointer_follow',
@@ -468,17 +496,17 @@ export class JavaInterpreter {
       fadingArrows: [],
     });
 
-    // Step 2: vtable lookup
+    // Step 2: vtable lookup — match by name AND arity for overloaded methods
     const klass = this.klassState.get(runtimeClass);
-    const slot  = klass?.vtable.find(s => s.methodName === methodName);
+    const slot  = klass?.vtable.find(s => s.methodName === methodName && s.arity === arity);
     if (!slot) {
-      throw new InterpreterHalt({ kind: 'runtime_error', message: `Method ${runtimeClass}.${methodName} not found in vtable` });
+      throw new InterpreterHalt({ kind: 'runtime_error', message: `Method ${runtimeClass}.${methodName}/${arity} not found in vtable` });
     }
 
     const vtableLookupArrowId = `arr-vtable-${this.nextArrowId++}`;
     this.emitStep(loc.line, {
       operation: 'vtable_lookup',
-      description: `vtable[${slot.slot}] → ${slot.implementedBy}.${methodName}()`,
+      description: `vtable[${slot.slot}] → ${slot.implementedBy}.${methodName}(${arity} arg${arity === 1 ? '' : 's'})`,
       highlightedElements: [{ region: 'metaspace', elementId: runtimeClass }],
       newArrows: [],
       fadingArrows: [],
@@ -487,10 +515,10 @@ export class JavaInterpreter {
     // Dispatch to concrete implementation
     const implClass  = slot.implementedBy;
     const implDecl   = this.loaded.decls.get(implClass);
-    const implMethod = implDecl?.methods.find(m => m.name === methodName && !m.isStatic);
+    const implMethod = implDecl?.methods.find(m => m.name === methodName && !m.isStatic && m.params.length === arity);
 
     if (!implMethod) {
-      throw new InterpreterHalt({ kind: 'runtime_error', message: `No implementation of ${methodName} found in ${implClass}` });
+      throw new InterpreterHalt({ kind: 'runtime_error', message: `No implementation of ${methodName}/${arity} found in ${implClass}` });
     }
 
     // Set up `this` correctly — receiver is passed as first argument
@@ -529,9 +557,10 @@ export class JavaInterpreter {
   }
 
   private invokeInterface(receiverClass: string, ifaceName: string, methodName: string, receiver: Value, args: Value[], loc: SourceLoc): Value {
+    const arity = args.length;
     const klass = this.klassState.get(receiverClass);
     const entry = klass?.itable.find(e => e.interfaceName === ifaceName);
-    const slot  = entry?.slots.find(s => s.methodName === methodName);
+    const slot  = entry?.slots.find(s => s.methodName === methodName && s.arity === arity);
 
     if (!slot) {
       // Fall back to vtable lookup (some interpreters handle this)
@@ -548,10 +577,10 @@ export class JavaInterpreter {
 
     const implClass  = slot.implementedBy;
     const implDecl   = this.loaded.decls.get(implClass);
-    const implMethod = implDecl?.methods.find(m => m.name === methodName && !m.isStatic);
+    const implMethod = implDecl?.methods.find(m => m.name === methodName && !m.isStatic && m.params.length === arity);
 
     if (!implMethod) {
-      throw new InterpreterHalt({ kind: 'runtime_error', message: `No implementation of ${methodName} found in ${implClass}` });
+      throw new InterpreterHalt({ kind: 'runtime_error', message: `No implementation of ${methodName}/${arity} found in ${implClass}` });
     }
 
     const frame = this.pushFrame(implClass, methodName, ['this', ...implMethod.params.map(p => p.name)], [receiver, ...args], implMethod.loc.line);
@@ -579,11 +608,12 @@ export class JavaInterpreter {
   private evalStaticMethodCall(expr: { kind: 'StaticMethodCallExpr'; className: string; method: string; args: Expr[]; loc: SourceLoc }): Value {
     this.ensureInitialized(expr.className, expr.loc.line);
 
+    const args   = expr.args.map(a => this.evalExpr(a));
+    const arity  = args.length;
     const decl   = this.loaded.decls.get(expr.className);
-    const method = decl?.methods.find(m => m.name === expr.method && m.isStatic);
-    if (!method) throw new InterpreterHalt({ kind: 'runtime_error', message: `Static method ${expr.className}.${expr.method} not found` });
+    const method = decl?.methods.find(m => m.name === expr.method && m.isStatic && m.params.length === arity);
+    if (!method) throw new InterpreterHalt({ kind: 'runtime_error', message: `Static method ${expr.className}.${expr.method}/${arity} not found` });
 
-    const args = expr.args.map(a => this.evalExpr(a));
     return this.executeMethod(expr.className, method, args);
   }
 
@@ -823,6 +853,56 @@ export class JavaInterpreter {
       }
     }
     throw new InterpreterHalt({ kind: 'runtime_error', message: `Unknown unary op: ${expr.op}` });
+  }
+
+  // ── instanceof ─────────────────────────────────────────────────────────────
+  // JVM checkcast equivalent: walk the runtime klass hierarchy in Metaspace.
+  // Emits a klass_pointer_follow step so the user sees the type-check path.
+
+  private evalInstanceof(expr: { kind: 'InstanceofExpr'; expr: Expr; className: string; loc: SourceLoc }): Value {
+    const val = this.evalExpr(expr.expr);
+
+    // Null is never an instanceof anything
+    if (val.kind === 'null') return { kind: 'boolean', value: false };
+    if (val.kind !== 'ref')  return { kind: 'boolean', value: false };
+
+    const obj = this.heap.get(val.objectId);
+    if (!obj) return { kind: 'boolean', value: false };
+
+    const runtimeClass  = obj.klassName;
+    const targetClass   = expr.className;
+
+    // Emit klass_pointer_follow: the JVM follows klass ptr and walks the hierarchy
+    this.emitStep(expr.loc.line, {
+      operation: 'klass_pointer_follow',
+      description: `instanceof: follow klass ptr of ${runtimeClass}, checking if assignable to ${targetClass}`,
+      highlightedElements: [
+        { region: 'heap',      elementId: val.objectId  },
+        { region: 'metaspace', elementId: runtimeClass  },
+        { region: 'metaspace', elementId: targetClass   },
+      ],
+      newArrows: [],
+      fadingArrows: [],
+    });
+
+    // Walk klass hierarchy: runtimeClass must be or extend targetClass
+    const result = this.isAssignableTo(runtimeClass, targetClass);
+    return { kind: 'boolean', value: result };
+  }
+
+  /** Returns true if runtimeClass IS targetClass or a subclass/implementor of it. */
+  private isAssignableTo(runtimeClass: string, targetClass: string): boolean {
+    let current: string | null = runtimeClass;
+    while (current !== null && current !== 'Object') {
+      if (current === targetClass) return true;
+      const decl = this.loaded.decls.get(current);
+      if (!decl) break;
+      // Check interfaces too
+      if (decl.interfaces.includes(targetClass)) return true;
+      current = decl.superclass;
+    }
+    // Object itself
+    return targetClass === 'Object';
   }
 
   // ── Locals ─────────────────────────────────────────────────────────────────

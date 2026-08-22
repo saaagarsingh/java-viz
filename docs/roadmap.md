@@ -35,20 +35,33 @@ no overlapping elements at 768px+, arrows computed from DOM positions
 
 Goal: paste real Java-like source, get an automatically generated trace.
 
-Supported subset:
-- Classes, fields, constructors
-- Instance and static methods
+Supported subset (Phase 1 + 1.5):
+- Classes, fields, constructors (including overloaded constructors — resolved by arity)
+- Instance and static methods (including overloaded methods — resolved by arity)
 - `static` and instance fields, static init blocks
 - Single inheritance, method overriding
 - Interfaces (default and abstract methods)
-- `if`, `for`, arithmetic, `new`, method calls, `println`
+- `if`, `for`, `while`, arithmetic, `new`, method calls, `println`
+- `break` and `continue` in `for`/`while` loops
+- Ternary `condition ? thenExpr : elseExpr`
+- `instanceof` type checks (emits klass_pointer_follow step)
+- Pre/post `++` / `--` (both as standalone statements and in initializers/RHS)
+- Compound assignment: `+=`, `-=`, `*=`, `/=`, `%=`
 
-Explicitly OUT of scope for Phase 1 (compile-time-only concepts —
-these become static explanatory diagrams later, not live traces):
+Explicitly OUT of scope for Phase 1+1.5:
 - Generics (type erasure has nothing to execute)
-- Lambdas / invokedynamic
-- Exceptions / try-with-resources
-- Records, enums (revisit only if time allows after core subset is solid)
+- Lambdas / invokedynamic (Phase 6)
+- Exceptions / try-catch-finally / throw (Phase 4)
+- Records, enums, sealed classes
+- Arrays and enhanced-for (Phase 5)
+- `switch` statements
+- `synchronized` blocks / volatile fields (Phase 2)
+- Native methods, annotations
+- Package/import declarations (only `java.lang` is implicit)
+- Nested / inner classes
+- `this()` constructor chaining
+- Varargs, multi-dimensional arrays
+- Labeled statements (labeled break/continue)
 
 Implementation notes:
 - Use the `java-parser` npm package (Chevrotain-based) for the AST.

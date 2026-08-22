@@ -555,7 +555,7 @@ function transformWhile(node: any): WhileStmt {
 function transformFor(node: any): ForStmt {
   const basic = child(node, 'basicForStatement') ?? child(node, 'basicForStatementNoShortIf');
   const enhanced = child(node, 'enhancedForStatement');
-  if (enhanced) throw new UnsupportedError('enhanced for loop (Phase 1.5)', loc(enhanced).line);
+  if (enhanced) throw new UnsupportedError('enhanced for loop (Phase 5)', loc(enhanced).line);
   if (!basic) throw new ParseError('Unrecognised for statement');
 
   // init
@@ -801,12 +801,14 @@ function transformUnaryExpr(node: any): Expr {
     const inner = c.primary?.[0] ?? c.unaryExpression?.[0];
     return transformExpr(inner); // unary + is a no-op
   }
-  // Prefix ++ / --  (PlusPlus / MinusMinus token key)
-  if (c.PlusPlus?.length) {
+  // Prefix ++ / --
+  // java-parser uses 'PlusPlus'/'MinusMinus' in expression-statement context
+  // but 'UnaryPrefixOperator' in initializer/RHS context — handle both.
+  if (c.PlusPlus?.length || (c.UnaryPrefixOperator?.length && c.UnaryPrefixOperator[0]?.image === '++')) {
     const inner = c.primary?.[0] ?? c.unaryExpression?.[0];
     return { kind: 'UnaryExpr', op: '++', operand: transformExpr(inner), prefix: true, loc: nodeLoc };
   }
-  if (c.MinusMinus?.length) {
+  if (c.MinusMinus?.length || (c.UnaryPrefixOperator?.length && c.UnaryPrefixOperator[0]?.image === '--')) {
     const inner = c.primary?.[0] ?? c.unaryExpression?.[0];
     return { kind: 'UnaryExpr', op: '--', operand: transformExpr(inner), prefix: true, loc: nodeLoc };
   }

@@ -60,16 +60,16 @@ export const invokeInterface: Step[] = [
         isInitialized: true,
         staticFields: [],
         vtable: [
-          { slot: 0, methodName: 'toString', descriptor: '()Ljava/lang/String;', implementedBy: 'Object' },
-          { slot: 1, methodName: 'equals',   descriptor: '(Ljava/lang/Object;)Z', implementedBy: 'Object' },
-          { slot: 2, methodName: 'hashCode', descriptor: '()I',                   implementedBy: 'Object' },
-          { slot: 3, methodName: 'greet',    descriptor: '()Ljava/lang/String;',  implementedBy: 'FormalGreeter' },
+          { slot: 0, methodName: 'toString', arity: 0, descriptor: '()Ljava/lang/String;', implementedBy: 'Object' },
+          { slot: 1, methodName: 'equals', arity: 1, descriptor: '(Ljava/lang/Object;)Z', implementedBy: 'Object' },
+          { slot: 2, methodName: 'hashCode', arity: 0, descriptor: '()I', implementedBy: 'Object' },
+          { slot: 3, methodName: 'greet', arity: 0, descriptor: '()Ljava/lang/String;', implementedBy: 'FormalGreeter' },
         ],
         itable: [
           {
             interfaceName: 'Greeter',
             slots: [
-              { slot: 0, methodName: 'greet', descriptor: '()Ljava/lang/String;', implementedBy: 'FormalGreeter' },
+              { slot: 0, methodName: 'greet', arity: 0, descriptor: '()Ljava/lang/String;', implementedBy: 'FormalGreeter' },
             ],
           },
         ],
@@ -125,16 +125,16 @@ export const invokeInterface: Step[] = [
         isInitialized: true,
         staticFields: [],
         vtable: [
-          { slot: 0, methodName: 'toString', descriptor: '()Ljava/lang/String;', implementedBy: 'Object' },
-          { slot: 1, methodName: 'equals',   descriptor: '(Ljava/lang/Object;)Z', implementedBy: 'Object' },
-          { slot: 2, methodName: 'hashCode', descriptor: '()I',                   implementedBy: 'Object' },
-          { slot: 3, methodName: 'greet',    descriptor: '()Ljava/lang/String;',  implementedBy: 'FormalGreeter' },
+          { slot: 0, methodName: 'toString', arity: 0, descriptor: '()Ljava/lang/String;', implementedBy: 'Object' },
+          { slot: 1, methodName: 'equals', arity: 1, descriptor: '(Ljava/lang/Object;)Z', implementedBy: 'Object' },
+          { slot: 2, methodName: 'hashCode', arity: 0, descriptor: '()I', implementedBy: 'Object' },
+          { slot: 3, methodName: 'greet', arity: 0, descriptor: '()Ljava/lang/String;', implementedBy: 'FormalGreeter' },
         ],
         itable: [
           {
             interfaceName: 'Greeter',
             slots: [
-              { slot: 0, methodName: 'greet', descriptor: '()Ljava/lang/String;', implementedBy: 'FormalGreeter' },
+              { slot: 0, methodName: 'greet', arity: 0, descriptor: '()Ljava/lang/String;', implementedBy: 'FormalGreeter' },
             ],
           },
         ],
@@ -210,16 +210,16 @@ export const invokeInterface: Step[] = [
         isInitialized: true,
         staticFields: [],
         vtable: [
-          { slot: 0, methodName: 'toString', descriptor: '()Ljava/lang/String;', implementedBy: 'Object' },
-          { slot: 1, methodName: 'equals',   descriptor: '(Ljava/lang/Object;)Z', implementedBy: 'Object' },
-          { slot: 2, methodName: 'hashCode', descriptor: '()I',                   implementedBy: 'Object' },
-          { slot: 3, methodName: 'greet',    descriptor: '()Ljava/lang/String;',  implementedBy: 'FormalGreeter' },
+          { slot: 0, methodName: 'toString', arity: 0, descriptor: '()Ljava/lang/String;', implementedBy: 'Object' },
+          { slot: 1, methodName: 'equals', arity: 1, descriptor: '(Ljava/lang/Object;)Z', implementedBy: 'Object' },
+          { slot: 2, methodName: 'hashCode', arity: 0, descriptor: '()I', implementedBy: 'Object' },
+          { slot: 3, methodName: 'greet', arity: 0, descriptor: '()Ljava/lang/String;', implementedBy: 'FormalGreeter' },
         ],
         itable: [
           {
             interfaceName: 'Greeter',
             slots: [
-              { slot: 0, methodName: 'greet', descriptor: '()Ljava/lang/String;', implementedBy: 'FormalGreeter' },
+              { slot: 0, methodName: 'greet', arity: 0, descriptor: '()Ljava/lang/String;', implementedBy: 'FormalGreeter' },
             ],
           },
         ],
@@ -298,16 +298,16 @@ export const invokeInterface: Step[] = [
         isInitialized: true,
         staticFields: [],
         vtable: [
-          { slot: 0, methodName: 'toString', descriptor: '()Ljava/lang/String;', implementedBy: 'Object' },
-          { slot: 1, methodName: 'equals',   descriptor: '(Ljava/lang/Object;)Z', implementedBy: 'Object' },
-          { slot: 2, methodName: 'hashCode', descriptor: '()I',                   implementedBy: 'Object' },
-          { slot: 3, methodName: 'greet',    descriptor: '()Ljava/lang/String;',  implementedBy: 'FormalGreeter' },
+          { slot: 0, methodName: 'toString', arity: 0, descriptor: '()Ljava/lang/String;', implementedBy: 'Object' },
+          { slot: 1, methodName: 'equals', arity: 1, descriptor: '(Ljava/lang/Object;)Z', implementedBy: 'Object' },
+          { slot: 2, methodName: 'hashCode', arity: 0, descriptor: '()I', implementedBy: 'Object' },
+          { slot: 3, methodName: 'greet', arity: 0, descriptor: '()Ljava/lang/String;', implementedBy: 'FormalGreeter' },
         ],
         itable: [
           {
             interfaceName: 'Greeter',
             slots: [
-              { slot: 0, methodName: 'greet', descriptor: '()Ljava/lang/String;', implementedBy: 'FormalGreeter' },
+              { slot: 0, methodName: 'greet', arity: 0, descriptor: '()Ljava/lang/String;', implementedBy: 'FormalGreeter' },
             ],
           },
         ],
@@ -390,16 +390,16 @@ export const invokeInterface: Step[] = [
         isInitialized: true,
         staticFields: [],
         vtable: [
-          { slot: 0, methodName: 'toString', descriptor: '()Ljava/lang/String;', implementedBy: 'Object' },
-          { slot: 1, methodName: 'equals',   descriptor: '(Ljava/lang/Object;)Z', implementedBy: 'Object' },
-          { slot: 2, methodName: 'hashCode', descriptor: '()I',                   implementedBy: 'Object' },
-          { slot: 3, methodName: 'greet',    descriptor: '()Ljava/lang/String;',  implementedBy: 'FormalGreeter' },
+          { slot: 0, methodName: 'toString', arity: 0, descriptor: '()Ljava/lang/String;', implementedBy: 'Object' },
+          { slot: 1, methodName: 'equals', arity: 1, descriptor: '(Ljava/lang/Object;)Z', implementedBy: 'Object' },
+          { slot: 2, methodName: 'hashCode', arity: 0, descriptor: '()I', implementedBy: 'Object' },
+          { slot: 3, methodName: 'greet', arity: 0, descriptor: '()Ljava/lang/String;', implementedBy: 'FormalGreeter' },
         ],
         itable: [
           {
             interfaceName: 'Greeter',
             slots: [
-              { slot: 0, methodName: 'greet', descriptor: '()Ljava/lang/String;', implementedBy: 'FormalGreeter' },
+              { slot: 0, methodName: 'greet', arity: 0, descriptor: '()Ljava/lang/String;', implementedBy: 'FormalGreeter' },
             ],
           },
         ],
