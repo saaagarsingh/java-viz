@@ -734,20 +734,23 @@ function transformBinaryExpr(node: any): Expr {
   }
 
   // ── Binary op: key 'BinaryOperator' ─────────────────────────────────────────
+  // java-parser flattens chained exprs into one node:
+  //   `i % 2 != 0`  →  unaryExpression:[i,2,0]  BinaryOperator:["%","!="]
+  // We must use BinaryOperator[i-1] for the i-th fold, NOT always [0].
   if (c.BinaryOperator?.length) {
     const opMap: Record<string, BinaryOp> = {
       '+': '+', '-': '-', '*': '*', '/': '/', '%': '%',
       '==': '==', '!=': '!=', '<': '<', '>': '>', '<=': '<=', '>=': '>=',
       '&&': '&&', '||': '||',
     };
-    const opImg = c.BinaryOperator[0]?.image as string;
-    const op    = opMap[opImg];
-    if (!op) throw new ParseError(`Unknown binary operator "${opImg}" at line ${nodeLoc.line}`);
     const operands: Expr[] = (c.unaryExpression ?? []).map(transformUnaryExpr);
-    if (operands.length < 2) throw new ParseError(`Binary op "${opImg}" needs ≥ 2 operands at line ${nodeLoc.line}`);
-    // Fold left-to-right for chains (a + b + c → ((a+b)+c))
+    if (operands.length < 2) throw new ParseError(`Binary op needs ≥ 2 operands at line ${nodeLoc.line}`);
+    // Fold left-to-right, consuming the correct operator at each step
     let result = operands[0]!;
     for (let i = 1; i < operands.length; i++) {
+      const opImg = c.BinaryOperator[i - 1]?.image as string;
+      const op    = opMap[opImg];
+      if (!op) throw new ParseError(`Unknown binary operator "${opImg}" at line ${nodeLoc.line}`);
       result = { kind: 'BinaryExpr', op, left: result, right: operands[i]!, loc: nodeLoc };
     }
     return result;
