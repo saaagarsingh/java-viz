@@ -1003,6 +1003,8 @@ export class JavaInterpreter {
       arrows:           [...this.arrows],
       delta,
       stdout:           [...this.stdout],
+      activeThreadId:   'main',  // Phase 2: currently hardcoded to 'main', will update in interpreter thread logic
+      threadStates:     new Map([['main', 'RUNNABLE']]),  // Phase 2: placeholder, will update with actual thread states
     };
 
     this.steps.push(step);
@@ -1025,6 +1027,7 @@ export class JavaInterpreter {
       lineNumber:   f.currentLine,
       locals:       this.snapshotLocals(f),
       operandStack: [],
+      threadId:     'main',  // Phase 2: hardcoded to 'main', will update in thread logic
     }));
   }
 
@@ -1044,6 +1047,8 @@ export class JavaInterpreter {
         objectId:  obj.objectId,
         klassName: obj.klassName,
         fields:    this.snapshotFields(obj),
+        markWord:  'unlocked',
+        monitor:   null,
       });
     }
     return result;

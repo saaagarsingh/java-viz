@@ -47,6 +47,7 @@ export const constructorPolymorphismTrap: Step[] = [
         descriptor: '([Ljava/lang/String;)V',
         lineNumber: 30,
         locals: [{ slot: 0, name: 'args', value: { kind: 'null' } }],
+        threadId: 'main',
         operandStack: [],
       },
     ],
@@ -102,6 +103,7 @@ export const constructorPolymorphismTrap: Step[] = [
         descriptor: '([Ljava/lang/String;)V',
         lineNumber: 30,
         locals: [{ slot: 0, name: 'args', value: { kind: 'null' } }],
+        threadId: 'main',
         operandStack: [],
       },
       {
@@ -113,6 +115,7 @@ export const constructorPolymorphismTrap: Step[] = [
         locals: [
           { slot: 0, name: 'this', value: { kind: 'ref', objectId: 'obj-1' } },
         ],
+        threadId: 'main',
         operandStack: [],
       },
     ],
@@ -193,6 +196,7 @@ export const constructorPolymorphismTrap: Step[] = [
         descriptor: '([Ljava/lang/String;)V',
         lineNumber: 30,
         locals: [{ slot: 0, name: 'args', value: { kind: 'null' } }],
+        threadId: 'main',
         operandStack: [],
       },
       {
@@ -204,6 +208,7 @@ export const constructorPolymorphismTrap: Step[] = [
         locals: [
           { slot: 0, name: 'this', value: { kind: 'ref', objectId: 'obj-1' } },
         ],
+        threadId: 'main',
         operandStack: [],
       },
       {
@@ -215,6 +220,7 @@ export const constructorPolymorphismTrap: Step[] = [
         locals: [
           { slot: 0, name: 'this', value: { kind: 'ref', objectId: 'obj-1' } },
         ],
+        threadId: 'main',
         operandStack: [],
       },
     ],
@@ -292,6 +298,7 @@ export const constructorPolymorphismTrap: Step[] = [
         descriptor: '([Ljava/lang/String;)V',
         lineNumber: 30,
         locals: [{ slot: 0, name: 'args', value: { kind: 'null' } }],
+        threadId: 'main',
         operandStack: [],
       },
       {
@@ -303,6 +310,7 @@ export const constructorPolymorphismTrap: Step[] = [
         locals: [
           { slot: 0, name: 'this', value: { kind: 'ref', objectId: 'obj-1' } },
         ],
+        threadId: 'main',
         operandStack: [],
       },
       {
@@ -314,6 +322,7 @@ export const constructorPolymorphismTrap: Step[] = [
         locals: [
           { slot: 0, name: 'this', value: { kind: 'ref', objectId: 'obj-1' } },
         ],
+        threadId: 'main',
         operandStack: [],
       },
     ],
@@ -391,6 +400,7 @@ export const constructorPolymorphismTrap: Step[] = [
         descriptor: '([Ljava/lang/String;)V',
         lineNumber: 30,
         locals: [{ slot: 0, name: 'args', value: { kind: 'null' } }],
+        threadId: 'main',
         operandStack: [],
       },
       {
@@ -402,6 +412,7 @@ export const constructorPolymorphismTrap: Step[] = [
         locals: [
           { slot: 0, name: 'this', value: { kind: 'ref', objectId: 'obj-1' } },
         ],
+        threadId: 'main',
         operandStack: [],
       },
       {
@@ -413,6 +424,7 @@ export const constructorPolymorphismTrap: Step[] = [
         locals: [
           { slot: 0, name: 'this', value: { kind: 'ref', objectId: 'obj-1' } },
         ],
+        threadId: 'main',
         operandStack: [],
       },
       {
@@ -424,6 +436,7 @@ export const constructorPolymorphismTrap: Step[] = [
         locals: [
           { slot: 0, name: 'this', value: { kind: 'ref', objectId: 'obj-1' } },
         ],
+        threadId: 'main',
         operandStack: [],
       },
     ],
@@ -505,6 +518,7 @@ export const constructorPolymorphismTrap: Step[] = [
         descriptor: '([Ljava/lang/String;)V',
         lineNumber: 30,
         locals: [{ slot: 0, name: 'args', value: { kind: 'null' } }],
+        threadId: 'main',
         operandStack: [],
       },
       {
@@ -516,6 +530,7 @@ export const constructorPolymorphismTrap: Step[] = [
         locals: [
           { slot: 0, name: 'this', value: { kind: 'ref', objectId: 'obj-1' } },
         ],
+        threadId: 'main',
         operandStack: [],
       },
       {
@@ -527,6 +542,7 @@ export const constructorPolymorphismTrap: Step[] = [
         locals: [
           { slot: 0, name: 'this', value: { kind: 'ref', objectId: 'obj-1' } },
         ],
+        threadId: 'main',
         operandStack: [],
       },
     ],
@@ -604,6 +620,7 @@ export const constructorPolymorphismTrap: Step[] = [
         descriptor: '([Ljava/lang/String;)V',
         lineNumber: 30,
         locals: [{ slot: 0, name: 'args', value: { kind: 'null' } }],
+        threadId: 'main',
         operandStack: [],
       },
     ],

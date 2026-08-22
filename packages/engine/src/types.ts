@@ -21,6 +21,22 @@ export type Value =
   | PrimitiveValue
   | { kind: 'ref'; objectId: string };       // stable heap reference
 
+// ── Thread & Synchronization (Phase 2) ───────────────────────────────────────
+
+export type MarkWordState =
+  | 'unlocked'
+  | { kind: 'thin-locked'; threadId: string }
+  | { kind: 'fat-locked'; threadId: string };
+
+export interface MonitorState {
+  owner:       string;       // threadId holding the lock
+  depth:       number;       // reentrant lock depth
+  waitQueue:   string[];     // threadIds waiting for this lock
+  acquiredAt:  number;       // step index when first acquired
+}
+
+export type ThreadStatus = 'CREATED' | 'RUNNABLE' | 'WAITING_ON_LOCK' | 'TERMINATED';
+
 // ── Stack ────────────────────────────────────────────────────────────────────
 
 export interface LocalVar {
@@ -30,13 +46,14 @@ export interface LocalVar {
 }
 
 export interface StackFrame {
-  frameId:      string;  // stable id across steps, e.g. "frame-3"
+  frameId:      string;      // stable id across steps, e.g. "frame-3"
+  threadId?:    string;      // NEW (Phase 2): which thread owns this frame (optional for now)
   className:    string;
   methodName:   string;
-  descriptor:   string;  // JVM descriptor e.g. "(ILjava/lang/String;)V"
+  descriptor:   string;      // JVM descriptor e.g. "(ILjava/lang/String;)V"
   lineNumber:   number | null;
   locals:       LocalVar[];
-  operandStack: Value[];  // index 0 = bottom
+  operandStack: Value[];     // index 0 = bottom
 }
 
 // ── Heap ─────────────────────────────────────────────────────────────────────
@@ -48,9 +65,11 @@ export interface FieldSlot {
 }
 
 export interface HeapObject {
-  objectId:  string;   // opaque stable id, e.g. "obj-1" — never a fake address
-  klassName: string;   // logical pointer → KlassInfo.klassName in metaspace
+  objectId:  string;              // opaque stable id, e.g. "obj-1" — never a fake address
+  klassName: string;              // logical pointer → KlassInfo.klassName in metaspace
   fields:    FieldSlot[];
+  markWord?: MarkWordState;       // NEW (Phase 2): lock state of this object (optional for now)
+  monitor?:  MonitorState | null; // NEW (Phase 2): monitor info if locked (optional for now)
 }
 
 // ── Metaspace ────────────────────────────────────────────────────────────────
@@ -99,7 +118,9 @@ export type OperationType =
   | 'vtable_lookup'
   | 'itable_lookup'
   | 'throw'
-  | 'catch';
+  | 'catch'
+  | 'monitor_enter'       // NEW (Phase 2): acquire lock
+  | 'monitor_exit';       // NEW (Phase 2): release lock
 
 export interface ArrowEndpoint {
   region:     Region;
@@ -126,12 +147,20 @@ export interface HighlightTarget {
   fieldName?: string;
 }
 
+export interface MonitorOperation {
+  kind:      'monitor_enter' | 'monitor_exit';
+  objectId:  string;
+  threadId:  string;
+  markWord:  MarkWordState;
+}
+
 export interface Delta {
   operation:           OperationType;
   description:         string;           // human-readable caption
   highlightedElements: HighlightTarget[]; // elements that pulse on entry
   newArrows:           string[];          // arrow ids that appear this step
   fadingArrows:        string[];          // arrow ids that fade out this step
+  monitorOperation?:   MonitorOperation;  // NEW (Phase 2): lock acquire/release
 }
 
 // ── Step — the full contract ──────────────────────────────────────────────────
@@ -153,4 +182,8 @@ export interface Step {
 
   /** Accumulated stdout up to and including this step */
   stdout: string[];
+
+  // NEW (Phase 2): Thread state (optional for now)
+  activeThreadId?:    string;                        // which thread owns this step
+  threadStates?:      Map<string, ThreadStatus>;     // status of all threads
 }

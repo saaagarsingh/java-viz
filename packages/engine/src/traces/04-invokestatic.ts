@@ -31,6 +31,7 @@ export const invokeStatic: Step[] = [
         descriptor: '([Ljava/lang/String;)V',
         lineNumber: 7,
         locals: [{ slot: 0, name: 'args', value: { kind: 'null' } }],
+        threadId: 'main',
         operandStack: [],
       },
     ],
@@ -71,6 +72,7 @@ export const invokeStatic: Step[] = [
         descriptor: '([Ljava/lang/String;)V',
         lineNumber: 7,
         locals: [{ slot: 0, name: 'args', value: { kind: 'null' } }],
+        threadId: 'main',
         operandStack: [],
       },
       {
@@ -83,6 +85,7 @@ export const invokeStatic: Step[] = [
           // No `this` slot — static method
           { slot: 0, name: 'n', value: { kind: 'int', value: 5 } },
         ],
+        threadId: 'main',
         operandStack: [],
       },
     ],
@@ -129,6 +132,7 @@ export const invokeStatic: Step[] = [
         descriptor: '([Ljava/lang/String;)V',
         lineNumber: 7,
         locals: [{ slot: 0, name: 'args', value: { kind: 'null' } }],
+        threadId: 'main',
         operandStack: [],
       },
       {
@@ -188,6 +192,7 @@ export const invokeStatic: Step[] = [
           { slot: 0, name: 'args',   value: { kind: 'null' } },
           { slot: 1, name: 'result', value: { kind: 'int', value: 25 } },
         ],
+        threadId: 'main',
         operandStack: [],
       },
     ],
@@ -236,6 +241,7 @@ export const invokeStatic: Step[] = [
           { slot: 0, name: 'args',   value: { kind: 'null' } },
           { slot: 1, name: 'result', value: { kind: 'int', value: 25 } },
         ],
+        threadId: 'main',
         operandStack: [],
       },
     ],

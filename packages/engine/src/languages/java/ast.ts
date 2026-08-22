@@ -43,6 +43,7 @@ export interface FieldDecl {
   type:        JavaType;
   initializer: Expr | null;
   isStatic:    boolean;
+  isVolatile:  boolean;   // NEW (Phase 2): volatile modifier
   loc:         SourceLoc;
 }
 
@@ -55,14 +56,15 @@ export interface ConstructorDecl {
 }
 
 export interface MethodDecl {
-  kind:       'MethodDecl';
-  name:       string;
-  returnType: JavaType;
-  params:     ParamDecl[];
-  body:       Statement[] | null;  // null = abstract / interface default
-  isStatic:   boolean;
-  isAbstract: boolean;
-  loc:        SourceLoc;
+  kind:           'MethodDecl';
+  name:           string;
+  returnType:     JavaType;
+  params:         ParamDecl[];
+  body:           Statement[] | null;  // null = abstract / interface default
+  isStatic:       boolean;
+  isAbstract:     boolean;
+  isSynchronized: boolean;  // NEW (Phase 2): synchronized modifier
+  loc:            SourceLoc;
 }
 
 export interface ParamDecl {
@@ -100,7 +102,8 @@ export type Statement =
   | WhileStmt
   | BlockStmt
   | BreakStmt
-  | ContinueStmt;
+  | ContinueStmt
+  | SynchronizedStmt;  // NEW (Phase 2): synchronized block
 
 export interface LocalVarDecl {
   kind:        'LocalVarDecl';
@@ -159,6 +162,14 @@ export interface BreakStmt {
 
 export interface ContinueStmt {
   kind: 'ContinueStmt';
+  loc:  SourceLoc;
+}
+
+/** NEW (Phase 2): synchronized (expr) { body } */
+export interface SynchronizedStmt {
+  kind: 'SynchronizedStmt';
+  expr: Expr;           // object being locked
+  body: Statement[];
   loc:  SourceLoc;
 }
 

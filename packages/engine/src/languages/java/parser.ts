@@ -20,7 +20,7 @@ import type {
   Program, ClassDecl, FieldDecl, ConstructorDecl, MethodDecl, ParamDecl,
   Statement, Expr, JavaType, SourceLoc,
   LocalVarDecl, ExprStmt, ReturnStmt, IfStmt, ForStmt, WhileStmt,
-  BreakStmt, ContinueStmt,
+  BreakStmt, ContinueStmt, SynchronizedStmt,
   BinaryOp, UnaryOp,
   VarExpr, FieldAccessExpr, StaticFieldAccessExpr,
 } from './ast.js';
@@ -268,10 +268,11 @@ function transformFieldDecl(node: any): FieldDecl[] {
     .map((t: any) => t.image ?? '')
     .filter(Boolean);
 
-  const isStatic = modTokens.includes('static');
+  const isStatic   = modTokens.includes('static');
+  const isVolatile = modTokens.includes('volatile');  // NEW (Phase 2)
 
-  if (modTokens.includes('volatile') || modTokens.includes('transient')) {
-    throw new UnsupportedError('volatile/transient fields', loc(node).line);
+  if (modTokens.includes('transient')) {
+    throw new UnsupportedError('transient fields', loc(node).line);
   }
 
   const type     = transformType(child(node, 'unannType'));
@@ -283,7 +284,7 @@ function transformFieldDecl(node: any): FieldDecl[] {
     const name      = tokenImage(idNode, 'Identifier') ?? '';
     const initNode  = child(vd, 'variableInitializer');
     const initializer = initNode ? transformExpr(child(initNode, 'expression') ?? initNode) : null;
-    return { kind: 'FieldDecl', name, type, initializer, isStatic, loc: loc(vd) };
+    return { kind: 'FieldDecl', name, type, initializer, isStatic, isVolatile, loc: loc(vd) };
   });
 }
 
@@ -298,10 +299,10 @@ function transformMethodDecl(node: any): MethodDecl {
     .map((t: any) => t.image ?? '')
     .filter(Boolean);
 
-  const isStatic   = modTokens.includes('static');
-  const isAbstract = modTokens.includes('abstract');
+  const isStatic        = modTokens.includes('static');
+  const isAbstract      = modTokens.includes('abstract');
+  const isSynchronized  = modTokens.includes('synchronized');  // NEW (Phase 2)
 
-  if (modTokens.includes('synchronized')) throw new UnsupportedError('synchronized methods', loc(node).line);
   if (modTokens.includes('native'))       throw new UnsupportedError('native methods', loc(node).line);
 
   const result    = child(header, 'result');
@@ -319,7 +320,7 @@ function transformMethodDecl(node: any): MethodDecl {
 
   const statements = body ? (child(body, 'block') ? transformBlock(child(body, 'block')) : null) : null;
 
-  return { kind: 'MethodDecl', name, returnType, params, body: statements, isStatic, isAbstract, loc: loc(node) };
+  return { kind: 'MethodDecl', name, returnType, params, body: statements, isStatic, isAbstract, isSynchronized, loc: loc(node) };
 }
 
 function transformInterfaceMethod(node: any): MethodDecl {
@@ -338,7 +339,7 @@ function transformInterfaceMethod(node: any): MethodDecl {
   const isDefault  = modTokens.includes('default');
   const statements = (isDefault && body) ? transformBlock(child(body, 'block')) : null;
 
-  return { kind: 'MethodDecl', name, returnType, params, body: statements, isStatic: false, isAbstract: !isDefault, loc: loc(node) };
+  return { kind: 'MethodDecl', name, returnType, params, body: statements, isStatic: false, isAbstract: !isDefault, isSynchronized: false, loc: loc(node) };
 }
 
 // ── Constructors ──────────────────────────────────────────────────────────────
@@ -510,7 +511,7 @@ function transformStatement(stmt: any): Statement {
     if (cont) return { kind: 'ContinueStmt', loc: loc(cont) } satisfies ContinueStmt;
     if (thr)         throw new UnsupportedError('throw statements (Phase 4)', loc(swts).line);
     if (sw)          throw new UnsupportedError('switch statements', loc(swts).line);
-    if (sync)        throw new UnsupportedError('synchronized blocks (Phase 2)', loc(sync).line);
+    if (sync)        return transformSynchronized(sync);  // NEW (Phase 2)
     if (tryS)        throw new UnsupportedError('try/catch/finally (Phase 4)', loc(tryS).line);
     if (empty)       return { kind: 'BlockStmt', statements: [], loc: loc(swts) };
     if (blk)         return { kind: 'BlockStmt', statements: transformBlock(blk), loc: loc(blk) };
@@ -590,6 +591,28 @@ function transformFor(node: any): ForStmt {
 
   const body = transformBlock_or_stmt(child(basic, 'statement'));
   return { kind: 'ForStmt', init, condition, update, body, loc: loc(node) };
+}
+
+
+// ── Synchronized Statement (Phase 2) ──────────────────────────────────────────
+/** NEW (Phase 2): synchronized (expr) { body } */
+function transformSynchronized(node: any) {
+  const c = node.children ?? {};
+  const syncExpr = c.expression?.[0];
+  const syncBlock = c.block?.[0];
+
+  if (!syncExpr) throw new ParseError(`synchronized without expression at line ${loc(node).line}`);
+  if (!syncBlock) throw new ParseError(`synchronized without block at line ${loc(node).line}`);
+
+  const expr = transformExpr(syncExpr);
+  const body = transformBlock(syncBlock);
+
+  return {
+    kind: 'SynchronizedStmt' as const,
+    expr,
+    body,
+    loc: loc(node),
+  };
 }
 
 // ── Expression dispatch ──────────────────────────────────────────────────────
