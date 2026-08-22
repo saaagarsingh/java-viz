@@ -25,7 +25,9 @@ const SUPPORTED: { label: string; items: string[] }[] = [
       'Interface implementation (implements)',
       'Instance + static fields',
       'Constructors + super()',
+      'Overloaded constructors (resolved by arity)',
       'Instance methods (virtual dispatch)',
+      'Overloaded methods (resolved by arity)',
       'Static methods (invokestatic)',
       'Method overriding (vtable)',
       'Interface dispatch (itable)',
@@ -39,6 +41,8 @@ const SUPPORTED: { label: string; items: string[] }[] = [
       'Logical: && || !',
       'Unary: - ++ --  (prefix & postfix)',
       'Assignment: = += -= *= /= %=',
+      'Ternary: condition ? then : else',
+      'instanceof type check',
       'String concatenation (+)',
       'new ClassName(args)',
       'this.field, this.method()',
@@ -52,6 +56,7 @@ const SUPPORTED: { label: string; items: string[] }[] = [
       'if / if-else',
       'while loop',
       'for loop (basic 3-part)',
+      'break / continue',
       'return (with or without value)',
       'System.out.println(...)',
     ],
@@ -68,12 +73,11 @@ const SUPPORTED: { label: string; items: string[] }[] = [
 const UNSUPPORTED: { label: string; phase: string; items: string[] }[] = [
   {
     label: 'Control flow',
-    phase: 'Phase 1.5',
+    phase: 'Phase 5',
     items: [
-      'Ternary operator (?:)',
-      'switch statement',
-      'break / continue',
       'Enhanced for-each (for x : list)',
+      'switch statement',
+      'Labeled break / continue',
     ],
   },
   {
@@ -86,10 +90,9 @@ const UNSUPPORTED: { label: string; phase: string; items: string[] }[] = [
   },
   {
     label: 'Type system',
-    phase: 'Phase 1.5',
+    phase: '—',
     items: [
       'Type casts: (Type) expr',
-      'instanceof',
       'Generics: List<T>',
     ],
   },
@@ -100,6 +103,7 @@ const UNSUPPORTED: { label: string; phase: string; items: string[] }[] = [
       'Array creation: new int[n]',
       'Array access: arr[i]',
       'Array parameters / return',
+      'Enhanced for-each (for x : arr)',
     ],
   },
   {
@@ -120,6 +124,8 @@ const UNSUPPORTED: { label: string; phase: string; items: string[] }[] = [
       'Multiple vars in one statement',
       'Varargs (...)',
       'Bitwise operators',
+      'synchronized blocks / volatile (Phase 2)',
+      'Records, enums, sealed classes',
     ],
   },
 ];
