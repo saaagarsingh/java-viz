@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "paths": {
+      "@jvm-viz/engine":                        ["../engine/src/index.ts"],
+      "@jvm-viz/engine/languages/java":         ["../engine/src/languages/java/index.ts"],
+      "@jvm-viz/engine/languages/java/limits":  ["../engine/src/languages/java/limits.ts"]
+    }
+  },
+  "include": ["src"]
+}

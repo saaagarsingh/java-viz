@@ -1,0 +1,111 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   JVM Visualizer — Design tokens
+   Closed color system: region colors never cross into operation colors.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* ── Background ─────────────────────────────────────────── */
+  --bg-base:        #0F1117;   /* instrument panel */
+  --bg-panel:       #161B22;   /* region panel surface */
+  --bg-panel-hover: #1C2330;
+
+  /* ── Region colors (one hue per region, used ONLY for that region) ─── */
+  --region-stack:        #6366F1;   /* indigo  — depth, directed */
+  --region-stack-dim:    #3730A3;
+  --region-stack-bg:     #1a1b3a;
+
+  --region-heap:         #F59E0B;   /* amber   — scattered, dynamic */
+  --region-heap-dim:     #B45309;
+  --region-heap-bg:      #2a1f0a;
+
+  --region-metaspace:    #14B8A6;   /* teal    — structural, static */
+  --region-metaspace-dim:#0F766E;
+  --region-metaspace-bg: #0a2421;
+
+  /* ── Operation colors (visually distinct from region colors) ──────── */
+  /* Solid arrows: calls */
+  --op-invoke-virtual:   #94A3B8;   /* slate   — virtual/interface dispatch */
+  --op-invoke-static:    #CBD5E1;   /* lighter slate — static/special */
+  /* Dashed arrows: reads / klass lookups */
+  --op-klass-lookup:     #94A3B8;   /* same hue, dashed stroke */
+  --op-read-return:      #64748B;   /* darker slate, dashed + hollow head */
+  /* Write arrows */
+  --op-write:            #D97706;   /* amber tint — writes/puts */
+
+  /* ── Highlight pulse (state changes — NOT a permanent color) ─────── */
+  --highlight-pulse:     rgba(251, 191, 36, 0.35);  /* brief flash on change */
+
+  /* ── Typography ─────────────────────────────────────────── */
+  --font-ui:    'Inter', system-ui, sans-serif;
+  --font-mono:  'JetBrains Mono', 'Fira Code', monospace;
+
+  --text-primary:    #E2E8F0;
+  --text-secondary:  #94A3B8;
+  --text-muted:      #475569;
+  --text-label:      #CBD5E1;
+
+  --text-xs:   11px;
+  --text-sm:   12px;
+  --text-base: 13px;
+  --text-md:   14px;
+  --text-lg:   16px;
+
+  /* ── Spacing ─────────────────────────────────────────────── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  /* ── Borders / Radius ────────────────────────────────────── */
+  --border-color:       #1E293B;
+  --border-color-dim:   #0F172A;
+  --radius-sm:  4px;
+  --radius-md:  6px;
+  --radius-lg:  8px;
+
+  /* ── Region border accent width ─────────────────────────── */
+  --region-border-width: 3px;
+
+  /* ── Transition ──────────────────────────────────────────── */
+  --transition-step:  200ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --transition-step: 0ms;
+  }
+}
+
+/* ── Reset ──────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Focus ring ──────────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--region-stack);
+  outline-offset: 2px;
+}
+
+/* ── Scrollbars ──────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-base); }
+::-webkit-scrollbar-thumb { background: #2d3748; border-radius: 3px; }

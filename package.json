@@ -1,0 +1,10 @@
+{
+  "name": "jvm-visualizer",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "dev": "npm run dev --workspace=packages/renderer",
+    "build": "npm run build --workspace=packages/engine && npm run build --workspace=packages/renderer",
+    "test": "npm run test --workspace=packages/engine"
+  }
+}
