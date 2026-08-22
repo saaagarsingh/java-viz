@@ -6,6 +6,7 @@ import { StackPanel }      from './components/StackPanel.js';
 import { HeapPanel }       from './components/HeapPanel.js';
 import { MetaspacePanel }  from './components/MetaspacePanel.js';
 import { ArrowOverlay }    from './components/ArrowOverlay.js';
+import { MethodInvocationArrow } from './components/MethodInvocationArrow.js';
 import { CodePanel }       from './components/CodePanel.js';
 import { ResizeHandle }    from './components/ResizeHandle.js';
 import { ErrorToast }      from './components/ErrorToast.js';
@@ -276,6 +277,7 @@ export function App() {
         </div>
 
         <ArrowOverlay arrows={step?.arrows ?? []} fadingArrows={fadingArrows} containerRef={mainRef} />
+        {step && <MethodInvocationArrow currentStep={step} containerRef={mainRef} />}
       </main>
 
       {/* ── Legend ───────────────────────────────────────────────────────── */}

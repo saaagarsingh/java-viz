@@ -127,7 +127,11 @@ export function MetaspacePanel({ klasses, highlights, arrows }: Props) {
                       {klass.vtable.map(slot => {
                         const isOverride = slot.implementedBy !== klass.superKlassName && slot.implementedBy !== 'Object';
                         return (
-                          <div key={slot.slot} className="vtable__row">
+                          <div
+                            key={slot.slot}
+                            id={`method-${klass.klassName}-${slot.methodName}`}
+                            className="vtable__row"
+                          >
                             <span className="vtable__slot">[{slot.slot}]</span>
                             <span className="vtable__method">{slot.methodName}</span>
                             <span className={`vtable__impl${isOverride && slot.implementedBy === klass.klassName ? ' vtable__impl--override' : ''}`}>

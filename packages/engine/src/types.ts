@@ -154,6 +154,12 @@ export interface MonitorOperation {
   markWord:  MarkWordState;
 }
 
+export interface MethodInvocation {
+  klassName:  string;   // Metaspace class where method lives
+  methodName: string;
+  frameId:    string;   // newly created stack frame
+}
+
 export interface Delta {
   operation:           OperationType;
   description:         string;           // human-readable caption
@@ -161,6 +167,7 @@ export interface Delta {
   newArrows:           string[];          // arrow ids that appear this step
   fadingArrows:        string[];          // arrow ids that fade out this step
   monitorOperation?:   MonitorOperation;  // NEW (Phase 2): lock acquire/release
+  methodInvoked?:      MethodInvocation;  // NEW (Phase 5a): method dispatch arrow
 }
 
 // ── Step — the full contract ──────────────────────────────────────────────────

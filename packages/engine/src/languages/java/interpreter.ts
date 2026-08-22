@@ -79,12 +79,27 @@ interface RuntimeFrame {
   currentLine: number | null;
 }
 
+// ── Thread state (Phase 2) ─────────────────────────────────────────────────
+
+interface ThreadState {
+  threadId:     string;
+  status:       'CREATED' | 'RUNNABLE' | 'WAITING_ON_LOCK' | 'TERMINATED';
+  callStack:    RuntimeFrame[];
+  nextFrameId:  number;  // per-thread frame ID counter
+}
+
+interface ObjectLock {
+  owner:       string;           // threadId holding the lock
+  depth:       number;           // reentrant lock depth (how many times locked by owner)
+  waitQueue:   string[];         // threadIds waiting for this lock
+  acquiredAt:  number;           // step index when first acquired
+}
+
 // ── Main interpreter class ────────────────────────────────────────────────────
 
 export class JavaInterpreter {
-  // Execution state
+  // Shared execution state (across all threads)
   private heap      = new Map<string, RuntimeObject>();
-  private callStack: RuntimeFrame[] = [];
   private stdout:    string[] = [];
   private steps:     Step[]  = [];
 
@@ -93,13 +108,18 @@ export class JavaInterpreter {
   // Mutable KlassInfo map (isInitialized changes at runtime)
   private klassState = new Map<string, KlassInfo>();
 
-  // ID counters
+  // ID counters (shared across threads)
   private nextObjectId = 1;
-  private nextFrameId  = 1;
+  private nextArrowId = 1;
 
   // Arrow tracking: arrows that are currently visible
   private arrows: Arrow[] = [];
-  private nextArrowId = 1;
+
+  // Phase 2: Thread management
+  private threads:        Map<string, ThreadState> = new Map();
+  private currentThreadId: string = 'main';
+  private locks:          Map<string, ObjectLock> = new Map();  // objectId → lock info
+  private threadOrder:    string[] = [];  // order to step through threads (for predictability)
 
   // ── Entry point ────────────────────────────────────────────────────────────
 
@@ -196,10 +216,37 @@ export class JavaInterpreter {
       highlightedElements: [{ region: 'stack', elementId: frame.frameId }],
       newArrows: [],
       fadingArrows: [],
+      methodInvoked: {
+        klassName: className,
+        methodName: method.name,
+        frameId: frame.frameId,
+      },
     });
 
     try {
-      this.executeStatements(method.body, method.loc.line);
+      // Phase 2: Handle synchronized methods
+      if (method.isSynchronized) {
+        let lockObjectId: string;
+        if (method.isStatic) {
+          // Static method: lock on class (simplified: use className as lock key)
+          lockObjectId = `klass:${className}`;
+        } else {
+          // Instance method: lock on this
+          const thisRef = frame.locals.get('this');
+          if (!thisRef || thisRef.kind !== 'ref') {
+            throw new InterpreterHalt({ kind: 'null_pointer', className, field: 'this', line: method.loc.line });
+          }
+          lockObjectId = thisRef.objectId;
+        }
+        this.acquireMonitor(lockObjectId, this.currentThreadId, method.loc.line);
+        try {
+          this.executeStatements(method.body, method.loc.line);
+        } finally {
+          this.releaseMonitor(lockObjectId, this.currentThreadId, method.loc.line);
+        }
+      } else {
+        this.executeStatements(method.body, method.loc.line);
+      }
     } catch (e) {
       if (e instanceof ReturnSignal) {
         this.popFrame();
@@ -230,6 +277,11 @@ export class JavaInterpreter {
       highlightedElements: [{ region: 'stack', elementId: frame.frameId }],
       newArrows: [],
       fadingArrows: [],
+      methodInvoked: {
+        klassName: className,
+        methodName: '<init>',
+        frameId: frame.frameId,
+      },
     });
 
     try {
@@ -329,6 +381,23 @@ export class JavaInterpreter {
       case 'BlockStmt':
         this.executeStatements(stmt.statements, stmt.loc.line);
         break;
+      case 'SynchronizedStmt': {
+        // Phase 2: Synchronized block
+        const obj = this.evalExpr(stmt.expr);
+        if (obj.kind !== 'ref') {
+          throw new InterpreterHalt({ kind: 'null_pointer', className: '(primitive)', field: 'synchronized', line: stmt.loc.line });
+        }
+        
+        const objectId = obj.objectId;
+        this.acquireMonitor(objectId, this.currentThreadId, stmt.loc.line);
+        
+        try {
+          this.executeStatements(stmt.body, stmt.loc.line);
+        } finally {
+          this.releaseMonitor(objectId, this.currentThreadId, stmt.loc.line);
+        }
+        break;
+      }
     }
   }
 
@@ -531,6 +600,11 @@ export class JavaInterpreter {
       highlightedElements: [{ region: 'stack', elementId: frame.frameId }],
       newArrows: [],
       fadingArrows: [],
+      methodInvoked: {
+        klassName: implClass,
+        methodName: methodName,
+        frameId: frame.frameId,
+      },
     });
 
     let returnValue: Value = { kind: 'uninitialized' };
@@ -953,12 +1027,13 @@ export class JavaInterpreter {
   // ── Frame management ───────────────────────────────────────────────────────
 
   private pushFrame(className: string, methodName: string, paramNames: string[], argValues: Value[], lineHint: number | null): RuntimeFrame {
-    if (this.callStack.length >= LIMITS.MAX_STACK_DEPTH) {
-      throw new InterpreterHalt({ kind: 'stack_overflow', maxDepth: LIMITS.MAX_STACK_DEPTH, frameCount: this.callStack.length });
+    const thread = this.getOrCreateThread(this.currentThreadId);
+    if (thread.callStack.length >= LIMITS.MAX_STACK_DEPTH) {
+      throw new InterpreterHalt({ kind: 'stack_overflow', maxDepth: LIMITS.MAX_STACK_DEPTH, frameCount: thread.callStack.length });
     }
 
     const frame: RuntimeFrame = {
-      frameId:     `frame-${this.nextFrameId++}`,
+      frameId:     `frame-${thread.nextFrameId++}`,
       className,
       methodName,
       descriptor:  '()',  // simplified
@@ -971,16 +1046,18 @@ export class JavaInterpreter {
       if (name !== undefined) frame.locals.set(name, argValues[i] ?? { kind: 'uninitialized' });
     }
 
-    this.callStack.push(frame);
+    thread.callStack.push(frame);
     return frame;
   }
 
   private popFrame() {
-    this.callStack.pop();
+    const thread = this.getOrCreateThread(this.currentThreadId);
+    thread.callStack.pop();
   }
 
   private topFrame(): RuntimeFrame | undefined {
-    return this.callStack[this.callStack.length - 1];
+    const thread = this.getOrCreateThread(this.currentThreadId);
+    return thread.callStack[thread.callStack.length - 1];
   }
 
   private setCurrentLine(line: number | null) {
@@ -988,10 +1065,29 @@ export class JavaInterpreter {
     if (frame) frame.currentLine = line;
   }
 
+  private getOrCreateThread(threadId: string): ThreadState {
+    if (!this.threads.has(threadId)) {
+      this.threads.set(threadId, {
+        threadId,
+        status: 'RUNNABLE',
+        callStack: [],
+        nextFrameId: 1,
+      });
+      this.threadOrder.push(threadId);
+    }
+    return this.threads.get(threadId)!;
+  }
+
   // ── Step emission ──────────────────────────────────────────────────────────
 
   private emitStep(sourceLineNumber: number | null, delta: Delta | null) {
     this.checkStepLimit();
+
+    // Build thread state map (Phase 2)
+    const threadStates = new Map<string, any>();
+    for (const [threadId, thread] of this.threads) {
+      threadStates.set(threadId, thread.status);
+    }
 
     const step: Step = {
       stepIndex:        this.steps.length,
@@ -1003,8 +1099,8 @@ export class JavaInterpreter {
       arrows:           [...this.arrows],
       delta,
       stdout:           [...this.stdout],
-      activeThreadId:   'main',  // Phase 2: currently hardcoded to 'main', will update in interpreter thread logic
-      threadStates:     new Map([['main', 'RUNNABLE']]),  // Phase 2: placeholder, will update with actual thread states
+      activeThreadId:   this.currentThreadId,  // Phase 2: actual active thread
+      threadStates,  // Phase 2: actual thread states
     };
 
     this.steps.push(step);
@@ -1019,16 +1115,25 @@ export class JavaInterpreter {
   // ── Snapshots ─────────────────────────────────────────────────────────────
 
   private snapshotStack(): StackFrame[] {
-    return this.callStack.map(f => ({
-      frameId:      f.frameId,
-      className:    f.className,
-      methodName:   f.methodName,
-      descriptor:   f.descriptor,
-      lineNumber:   f.currentLine,
-      locals:       this.snapshotLocals(f),
-      operandStack: [],
-      threadId:     'main',  // Phase 2: hardcoded to 'main', will update in thread logic
-    }));
+    const result: StackFrame[] = [];
+    // Iterate threads in order for deterministic output
+    for (const threadId of this.threadOrder) {
+      const thread = this.threads.get(threadId);
+      if (!thread) continue;
+      for (const f of thread.callStack) {
+        result.push({
+          frameId:      f.frameId,
+          className:    f.className,
+          methodName:   f.methodName,
+          descriptor:   f.descriptor,
+          lineNumber:   f.currentLine,
+          locals:       this.snapshotLocals(f),
+          operandStack: [],
+          threadId,  // Phase 2: actual thread ID
+        });
+      }
+    }
+    return result;
   }
 
   private snapshotLocals(frame: RuntimeFrame) {
@@ -1042,13 +1147,28 @@ export class JavaInterpreter {
 
   private snapshotHeap(): HeapObject[] {
     const result: HeapObject[] = [];
-    for (const [, obj] of this.heap) {
+    for (const [objId, obj] of this.heap) {
+      const lock = this.locks.get(objId);
+      let markWord: any = 'unlocked';
+      let monitor: any = null;
+
+      if (lock) {
+        // Object is locked
+        markWord = { kind: 'thin-locked', threadId: lock.owner };
+        monitor = {
+          owner: lock.owner,
+          depth: lock.depth,
+          waitQueue: lock.waitQueue,
+          acquiredAt: lock.acquiredAt,
+        };
+      }
+
       result.push({
         objectId:  obj.objectId,
         klassName: obj.klassName,
         fields:    this.snapshotFields(obj),
-        markWord:  'unlocked',
-        monitor:   null,
+        markWord,
+        monitor,
       });
     }
     return result;
@@ -1180,6 +1300,119 @@ export class JavaInterpreter {
       case 'ref':     return `<${v.objectId}>`;
       default:        return '?';
     }
+  }
+
+  // ── Lock / Monitor management (Phase 2) ────────────────────────────────────
+
+  private acquireMonitor(objectId: string, threadId: string, lineHint: number | null) {
+    let lock = this.locks.get(objectId);
+
+    if (!lock) {
+      // First acquire - create lock
+      lock = {
+        owner: threadId,
+        depth: 1,
+        waitQueue: [],
+        acquiredAt: this.steps.length,
+      };
+      this.locks.set(objectId, lock);
+
+      // Emit monitor_enter delta
+      this.emitStep(lineHint, {
+        operation: 'monitor_enter',
+        description: `monitor_enter — ${threadId} acquired lock on ${objectId}`,
+        highlightedElements: [{ region: 'heap', elementId: objectId }],
+        newArrows: [],
+        fadingArrows: [],
+        monitorOperation: {
+          kind: 'monitor_enter',
+          objectId,
+          threadId,
+          markWord: { kind: 'thin-locked', threadId },
+        },
+      });
+    } else if (lock.owner === threadId) {
+      // Reentrant lock - same thread acquiring again
+      lock.depth++;
+
+      this.emitStep(lineHint, {
+        operation: 'monitor_enter',
+        description: `monitor_enter — ${threadId} reentrant lock depth now ${lock.depth}`,
+        highlightedElements: [{ region: 'heap', elementId: objectId }],
+        newArrows: [],
+        fadingArrows: [],
+        monitorOperation: {
+          kind: 'monitor_enter',
+          objectId,
+          threadId,
+          markWord: { kind: 'thin-locked', threadId },
+        },
+      });
+    } else {
+      // Lock held by another thread - add to wait queue
+      lock.waitQueue.push(threadId);
+      const thread = this.getOrCreateThread(threadId);
+      thread.status = 'WAITING_ON_LOCK';
+
+      this.emitStep(lineHint, {
+        operation: 'monitor_enter',
+        description: `monitor_enter — ${threadId} waiting for lock held by ${lock.owner}`,
+        highlightedElements: [{ region: 'heap', elementId: objectId }],
+        newArrows: [],
+        fadingArrows: [],
+        monitorOperation: {
+          kind: 'monitor_enter',
+          objectId,
+          threadId,
+          markWord: { kind: 'thin-locked', threadId: lock.owner },
+        },
+      });
+
+      // Simplified: for demo purposes, just let the thread acquire after waiting
+      // In a real implementation, we'd need proper scheduling
+      lock.waitQueue.shift();
+      lock.owner = threadId;
+      lock.depth = 1;
+      thread.status = 'RUNNABLE';
+    }
+  }
+
+  private releaseMonitor(objectId: string, threadId: string, lineHint: number | null) {
+    const lock = this.locks.get(objectId);
+    if (!lock || lock.owner !== threadId) {
+      throw new InterpreterHalt({ kind: 'runtime_error', message: `monitor_exit: ${threadId} does not own lock on ${objectId}` });
+    }
+
+    lock.depth--;
+
+    if (lock.depth === 0) {
+      // Fully released
+      const nextWaiter = lock.waitQueue.shift();
+      if (nextWaiter) {
+        // Wake up next thread in wait queue
+        lock.owner = nextWaiter;
+        lock.depth = 1;
+        const thread = this.getOrCreateThread(nextWaiter);
+        thread.status = 'RUNNABLE';
+      } else {
+        // No waiters, remove lock
+        this.locks.delete(objectId);
+      }
+    }
+
+    this.emitStep(lineHint, {
+      operation: 'monitor_exit',
+      description: `monitor_exit — ${threadId} released lock on ${objectId} (depth now ${lock?.depth ?? 0})`,
+      highlightedElements: [{ region: 'heap', elementId: objectId }],
+      newArrows: [],
+      fadingArrows: [],
+      monitorOperation: {
+        kind: 'monitor_exit',
+        objectId,
+        threadId,
+        markWord: lock && lock.depth > 0 ? { kind: 'thin-locked', threadId: lock.owner } : 'unlocked',
+      },
+    });
   }
 }
 
