@@ -152,7 +152,7 @@ export function ArrowOverlay({ arrows, fadingArrows, containerRef }: Props) {
     setComputed(results);
   }, [arrows, fadingArrows, containerRef]);
 
-  // Recompute on mount, step change, and resize
+  // Recompute on mount, step change, resize, and any scroll inside the container
   useEffect(() => {
     // Allow DOM to settle before measuring
     rafRef.current = requestAnimationFrame(compute);
@@ -162,9 +162,18 @@ export function ArrowOverlay({ arrows, fadingArrows, containerRef }: Props) {
     });
     const container = containerRef.current;
     if (container) ro.observe(container);
+
+    // Capture scroll events from any scrollable child (panel bodies, etc.)
+    const handleScroll = () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      rafRef.current = requestAnimationFrame(compute);
+    };
+    if (container) container.addEventListener('scroll', handleScroll, true);
+
     return () => {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
       ro.disconnect();
+      if (container) container.removeEventListener('scroll', handleScroll, true);
     };
   }, [compute, containerRef]);
 

@@ -21,6 +21,7 @@ import type {
   Statement, Expr, JavaType, SourceLoc,
   LocalVarDecl, ExprStmt, ReturnStmt, IfStmt, ForStmt, WhileStmt,
   BinaryOp, UnaryOp,
+  VarExpr, FieldAccessExpr, StaticFieldAccessExpr,
 } from './ast.js';
 
 // ── Error type ────────────────────────────────────────────────────────────────
@@ -143,20 +144,22 @@ function transformClassDecl(node: any, modifiers: string[]): ClassDecl {
     throw new UnsupportedError('enum/record/sealed class', tok?.startLine);
   }
 
-  const name     = tokenImage(normalClass, 'Identifier') ?? tokenImage(normalClass, 'typeIdentifier') ?? 'Unknown';
+  // Class name is inside typeIdentifier → Identifier (NOT a direct Identifier child)
+  const typeId   = child(normalClass, 'typeIdentifier');
+  const name     = tokenImage(typeId, 'Identifier') ?? 'Unknown';
   const isAbstract = modifiers.includes('abstract');
   const nodeLoc  = loc(normalClass) ?? { line: 0, column: 0 };
 
-  // Superclass
+  // Superclass: classExtends → classType → Identifier
   let superclass: string | null = null;
-  const superclause = child(normalClass, 'superclass');
+  const superclause = child(normalClass, 'classExtends') ?? child(normalClass, 'superclass');
   if (superclause) {
     superclass = extractTypeName(child(superclause, 'classType'));
   }
 
-  // Interfaces
+  // Interfaces: classImplements → interfaceTypeList → interfaceType → classType
   const interfaces: string[] = [];
-  const ifaceClause = child(normalClass, 'superinterfaces');
+  const ifaceClause = child(normalClass, 'classImplements') ?? child(normalClass, 'superinterfaces');
   if (ifaceClause) {
     const typeList = child(ifaceClause, 'interfaceTypeList');
     if (typeList) {
@@ -182,8 +185,10 @@ function transformInterfaceDecl(node: any): ClassDecl {
   const normalIface = child(node, 'normalInterfaceDeclaration');
   if (!normalIface) throw new UnsupportedError('annotation type');
 
-  const name    = tokenImage(normalIface, 'Identifier') ?? tokenImage(normalIface, 'typeIdentifier') ?? 'Unknown';
-  const nodeLoc = loc(normalIface);
+  // Interface name is inside typeIdentifier → Identifier
+  const ifTypeId = child(normalIface, 'typeIdentifier');
+  const name     = tokenImage(ifTypeId, 'Identifier') ?? 'Unknown';
+  const nodeLoc  = loc(normalIface);
 
   // extends (interface)
   const interfaces: string[] = [];
@@ -347,69 +352,60 @@ function transformConstructor(node: any, className: string): ConstructorDecl {
 function transformConstructorBody(body: any): Statement[] {
   const stmts: Statement[] = [];
 
-  // Explicit constructor invocation (super(...) or this(...))
-  const eci = child(body, 'explicitGenericInvocation') ??
-              child(body, 'explicitConstructorInvocation') ??
-              children(body, 'blockStatement').find((bs: any) =>
-                child(bs, 'statement')?.children?.explicitConstructorInvocation);
-
-  // java-parser puts super()/this() as a special child
-  const superInv = child(body, 'superCall') ?? findSuperCall(body);
-  if (superInv) {
-    stmts.push(transformSuperCall(superInv));
+  // super() / this() is a DIRECT child of constructorBody as explicitConstructorInvocation
+  // (NOT inside blockStatements)
+  const eci = child(body, 'explicitConstructorInvocation');
+  if (eci) {
+    const uq = child(eci, 'unqualifiedExplicitConstructorInvocation');
+    if (uq) {
+      const argList = child(uq, 'argumentList');
+      const args    = argList ? children(argList, 'expression').map(transformExpr) : [];
+      stmts.push({
+        kind: 'ExprStmt',
+        expr: { kind: 'SuperCallExpr', args, loc: loc(uq) },
+        loc:  loc(uq),
+      });
+    }
+    // this() chaining not supported
+    const qual = child(eci, 'qualifiedExplicitConstructorInvocation');
+    if (qual) throw new UnsupportedError('this() constructor chaining', loc(eci).line);
   }
 
-  for (const bs of children(body, 'blockStatement') ?? children(body, 'blockStatements')?.[0] ? children(children(body, 'blockStatements')[0], 'blockStatement') : []) {
-    const s = transformBlockStatement(bs);
+  // Regular statements are in blockStatements (direct child of constructorBody)
+  const bs    = child(body, 'blockStatements');
+  const allBs = bs ? children(bs, 'blockStatement') : children(body, 'blockStatement');
+  for (const b of allBs) {
+    const s = transformBlockStatement(b);
     if (s) stmts.push(s);
   }
 
   return stmts;
 }
 
-/** Walk body to find a super(...) or this(...) invocation as first statement */
-function findSuperCall(body: any): any | null {
-  const blockStmts = children(body, 'blockStatements');
-  const allBs = blockStmts.length > 0
-    ? children(blockStmts[0], 'blockStatement')
-    : children(body, 'blockStatement');
-  if (allBs.length === 0) return null;
-  const first = allBs[0];
-  const stmt = child(first, 'statement');
-  if (!stmt) return null;
-  const exprStmt = child(stmt, 'statementWithoutTrailingSubstatement');
-  if (!exprStmt) return null;
-  const es = child(exprStmt, 'expressionStatement');
-  if (!es) return null;
-  const expr = child(es, 'statementExpression');
-  if (!expr) return null;
-  // Check if it's a methodInvocation to 'super'
-  const mi = child(expr, 'methodInvocation');
-  if (mi && (tokenImage(mi, 'Super') || tokenImage(mi, 'super'))) return mi;
-  return null;
-}
-
-function transformSuperCall(node: any): Statement {
-  const argList = child(node, 'argumentList');
-  const args    = argList ? children(argList, 'expression').map(transformExpr) : [];
-  return {
-    kind: 'ExprStmt',
-    expr: { kind: 'SuperCallExpr', args, loc: loc(node) },
-    loc:  loc(node),
-  };
-}
-
 // ── Parameters ────────────────────────────────────────────────────────────────
+
+/** Recursively test whether a type node contains array dims (String[], int[], etc.) */
+function hasArrayDims(node: any): boolean {
+  if (!node || typeof node !== 'object' || node.image !== undefined) return false;
+  if (node.children?.dims) return true;
+  return Object.values(node.children ?? {}).some(
+    (arr: any) => Array.isArray(arr) && arr.some(hasArrayDims),
+  );
+}
 
 function transformFormalParams(node: any): ParamDecl[] {
   if (!node) return [];
   const params: ParamDecl[] = [];
   for (const fp of children(node, 'formalParameter')) {
-    if (child(fp, 'variableArityParameter')) {
-      throw new UnsupportedError('varargs', loc(fp).line);
-    }
-    const type = transformType(child(fp, 'unannType'));
-    const id   = child(fp, 'variableDeclaratorId');
+    // Silently skip varargs (e.g. String... args) — never used in our subset
+    if (child(fp, 'variableArityParameter')) continue;
+    // java-parser wraps the param in variableParaRegularParameter
+    const reg       = child(fp, 'variableParaRegularParameter') ?? fp;
+    const unannType = child(reg, 'unannType');
+    // Silently skip array-type params (e.g. String[] args in main) — never populated
+    if (hasArrayDims(unannType)) continue;
+    const type = transformType(unannType);
+    const id   = child(reg, 'variableDeclaratorId');
     const name = tokenImage(id, 'Identifier') ?? '';
     params.push({ name, type });
   }
@@ -460,7 +456,8 @@ function transformLocalVar(node: any): LocalVarDecl {
 
 function transformStatement(stmt: any): Statement {
   const swts = child(stmt, 'statementWithoutTrailingSubstatement');
-  const ifS  = child(stmt, 'ifThenStatement') ?? child(stmt, 'ifThenElseStatement');
+  // java-parser uses 'ifStatement' for both if/if-else (not ifThenStatement/ifThenElseStatement)
+  const ifS  = child(stmt, 'ifStatement') ?? child(stmt, 'ifThenStatement') ?? child(stmt, 'ifThenElseStatement');
   const wS   = child(stmt, 'whileStatement');
   const forS = child(stmt, 'forStatement');
   const labeled = child(stmt, 'labeledStatement');
@@ -568,146 +565,458 @@ function transformFor(node: any): ForStmt {
   return { kind: 'ForStmt', init, condition, update, body, loc: loc(node) };
 }
 
-// ── Expression dispatch ───────────────────────────────────────────────────────
+// ── Expression dispatch ──────────────────────────────────────────────────────
+// The java-parser CST structure for ALL expressions:
+//   statementExpression → expression → conditionalExpression → binaryExpression
+//   binaryExpression uses key 'AssignmentOperator' for =, +=, etc.
+//                       uses key 'BinaryOperator'   for +, -, >, ==, etc.
+//   unaryExpression { Not/Minus/Plus prefix; UnarySuffixOperator for x++; primary }
+//   primary { primaryPrefix, primarySuffix[] }
+//   primaryPrefix { This | literal | newExpression | fqnOrRefType }
+//   primarySuffix { Dot+Identifier | methodInvocationSuffix }
 
 function transformStatementExpr(se: any): Expr {
   if (!se) throw new ParseError('Empty statement expression');
-  const assign  = child(se, 'assignment');
-  const mi      = child(se, 'methodInvocation');
-  const preIncr = child(se, 'preIncrementExpression');
-  const preDecr = child(se, 'preDecrementExpression');
-  const postIncr = child(se, 'postIncrementExpression');
-  const postDecr = child(se, 'postDecrementExpression');
-  const classInst = child(se, 'classInstanceCreationExpression');
-
-  if (assign)   return transformAssignment(assign);
-  if (mi)       return transformMethodInvocation(mi);
-  if (classInst) return transformNewObject(classInst);
-  if (preIncr || preDecr || postIncr || postDecr) {
-    const node = preIncr ?? preDecr ?? postIncr ?? postDecr;
-    const op: UnaryOp = (preIncr || postIncr) ? '++' : '--';
-    const prefix = !!(preIncr || preDecr);
-    const operand = transformExpr(children(node, 'unaryExpression')[0] ??
-                                  children(node, 'postfixExpression')[0] ??
-                                  children(node, 'unaryExpressionNotPlusMinus')[0] ??
-                                  node);
-    return { kind: 'UnaryExpr', op, operand, prefix, loc: loc(node) };
-  }
-
-  throw new ParseError(`Unsupported statement expression at line ${loc(se).line}`);
+  // statementExpression has exactly ONE child: 'expression'
+  const exprNode = child(se, 'expression');
+  if (!exprNode) throw new ParseError(`Empty statementExpression at line ${loc(se).line}`);
+  return transformExpr(exprNode);
 }
+
+// ── transformExpr: top-level CST rule dispatcher ──────────────────────────────
 
 function transformExpr(node: any): Expr {
   if (!node) throw new ParseError('Null expression node');
 
-  // ── Leaf token: handle before anything else ──────────────────────────────────
-  // Some paths (binary operand extraction, direct token args) pass tokens directly.
+  // Leaf token (passed directly, e.g. from binary operand extraction)
   if (node.image !== undefined && !node.children) {
-    const img = node.image as string;
-    const tn  = (node.tokenType?.name ?? '') as string;
-    if (img === 'true')  return { kind: 'BoolLiteral',   value: true,  loc: loc(node) };
-    if (img === 'false') return { kind: 'BoolLiteral',   value: false, loc: loc(node) };
-    if (img === 'null')  return { kind: 'NullLiteral',                 loc: loc(node) };
-    if (img === 'this')  return { kind: 'ThisExpr',                    loc: loc(node) };
-    if (img.startsWith('"') && img.endsWith('"')) {
-      return { kind: 'StringLiteral', value: parseStringLiteral(img), loc: loc(node) };
-    }
-    if (/^\d/.test(img) || tn.toLowerCase().includes('integer') || tn.toLowerCase().includes('decimal') || tn.toLowerCase().includes('hex') || tn.toLowerCase().includes('float') || tn.toLowerCase().includes('char')) {
-      return transformLiteral(node);
-    }
-    if (tn === 'Identifier' || (!tn && /^[a-zA-Z_$]/.test(img))) {
-      return { kind: 'VarExpr', name: img, loc: loc(node) };
-    }
+    return transformLeafToken(node);
   }
 
-  const tag = node.name ?? Object.keys(node.children ?? {})[0];
+  const name = node.name as string | undefined;
 
-  // ── Literal checks (node is a CST rule with literal children) ────────────────
-  if (node.children?.integerLiteral) return transformLiteral(node.children.integerLiteral[0]);
-  if (node.children?.floatingPointLiteral) return transformLiteral(node.children.floatingPointLiteral[0]);
-  if (node.children?.booleanLiteral) return transformLiteral(node.children.booleanLiteral[0]);
-  if (node.children?.characterLiteral) return transformLiteral(node.children.characterLiteral[0]);
-  if (node.children?.StringLiteral) return { kind: 'StringLiteral', value: parseStringLiteral(node.children.StringLiteral[0].image), loc: loc(node.children.StringLiteral[0]) };
-  if (node.children?.Null) return { kind: 'NullLiteral', loc: loc(node.children.Null[0]) };
-  if (node.children?.This) return { kind: 'ThisExpr', loc: loc(node.children.This[0]) };
-
-  // ── Assignment ────────────────────────────────────────────────────────────────
-  if (node.children?.assignment) return transformAssignment(node.children.assignment[0]);
-  if (node.name === 'assignment') return transformAssignment(node);
-
-  // ── Method invocation ─────────────────────────────────────────────────────────
-  if (node.children?.methodInvocation) return transformMethodInvocation(node.children.methodInvocation[0]);
-  if (node.name === 'methodInvocation') return transformMethodInvocation(node);
-
-  // ── New object ────────────────────────────────────────────────────────────────
-  if (node.children?.classInstanceCreationExpression) return transformNewObject(node.children.classInstanceCreationExpression[0]);
-  if (node.name === 'classInstanceCreationExpression') return transformNewObject(node);
-
-  // ── Binary / ternary ──────────────────────────────────────────────────────────
-  if (node.name === 'ternaryExpression' || node.children?.QuestionMark) throw new UnsupportedError('ternary expression (Phase 1.5)', loc(node).line);
-
-  // java-parser names binary rules: binaryExpression, additiveExpression,
-  // multiplicativeExpression, relationalExpression, equalityExpression,
-  // conditionalAndExpression, conditionalOrExpression, etc.
-  const BINARY_RULE_NAMES = new Set([
-    'binaryExpression', 'additiveExpression', 'multiplicativeExpression',
-    'relationalExpression', 'equalityExpression', 'exclusiveOrExpression',
-    'andExpression', 'inclusiveOrExpression',
-    'conditionalAndExpression', 'conditionalOrExpression',
-    'shiftExpression',
-  ]);
-  if (node.name && BINARY_RULE_NAMES.has(node.name)) return transformBinary(node);
-
-  // ── Field / method chain with Dot ─────────────────────────────────────────────
-  if (node.children?.Dot) return transformFieldOrMethodAccess(node);
-
-  // ── Unary ─────────────────────────────────────────────────────────────────────
-  if (node.name === 'unaryExpression' || node.name === 'unaryExpressionNotPlusMinus') return transformUnary(node);
-  if (node.name === 'preIncrementExpression')  return { kind: 'UnaryExpr', op: '++', operand: transformExpr(node.children.unaryExpression[0]), prefix: true,  loc: loc(node) };
-  if (node.name === 'preDecrementExpression')  return { kind: 'UnaryExpr', op: '--', operand: transformExpr(node.children.unaryExpression[0]), prefix: true,  loc: loc(node) };
-  if (node.name === 'postIncrementExpression') return { kind: 'UnaryExpr', op: '++', operand: transformExpr(node.children.postfixExpression[0]), prefix: false, loc: loc(node) };
-  if (node.name === 'postDecrementExpression') return { kind: 'UnaryExpr', op: '--', operand: transformExpr(node.children.postfixExpression[0]), prefix: false, loc: loc(node) };
-
-  // ── Cast / instanceof ─────────────────────────────────────────────────────────
-  if (node.name === 'castExpression') throw new UnsupportedError('type cast (Phase 1.5)', loc(node).line);
-  if (node.children?.Instanceof) throw new UnsupportedError('instanceof (Phase 1.5)', loc(node).line);
-
-  // ── Lambda ────────────────────────────────────────────────────────────────────
-  if (node.name === 'lambdaExpression') throw new UnsupportedError('lambda (Phase 6)', loc(node).line);
-
-  // ── Parenthesised ─────────────────────────────────────────────────────────────
-  if (node.children?.LBrace || node.children?.LParen) {
-    const inner = children(node, 'expression')[0] ?? children(node, 'expressionName')[0];
-    if (inner) return transformExpr(inner);
+  switch (name) {
+    case 'expression':
+    case 'assignmentExpression': {
+      // expression → conditionalExpression | lambdaExpression
+      if (node.children?.lambdaExpression) throw new UnsupportedError('lambda (Phase 6)', loc(node).line);
+      const cond = node.children?.conditionalExpression?.[0];
+      if (cond) return transformExpr(cond);
+      break;
+    }
+    case 'conditionalExpression': {
+      if (node.children?.QuestionMark) throw new UnsupportedError('ternary expression', loc(node).line);
+      const bin = node.children?.binaryExpression?.[0];
+      if (bin) return transformBinaryExpr(bin);
+      break;
+    }
+    case 'binaryExpression':
+      return transformBinaryExpr(node);
+    case 'unaryExpression':
+      return transformUnaryExpr(node);
+    case 'primary':
+      return transformPrimary(node);
   }
 
-  // ── Single-child unwrap ───────────────────────────────────────────────────────
-  // CRITICAL: filter keys with empty arrays so `primarySuffix: []` doesn't block
-  // the unwrap when a `primary` node has `primaryPrefix: [x]` + `primarySuffix: []`.
-  const SKIP_KEYS = new Set(['LBrace','RBrace','LParen','RParen','Semicolon','Comma','Dot','Super']);
-  const childKeys = Object.keys(node.children ?? {})
-    .filter(k => !SKIP_KEYS.has(k))
-    .filter(k => ((node.children as any)[k] as any[]).length > 0);
-
+  // Single-child unwrap (handles: variableInitializer, localVariableType, etc.)
+  const childKeys = Object.keys(node.children ?? {}).filter(
+    k => ((node.children as any)[k] as any[]).length > 0,
+  );
   if (childKeys.length === 1 && ((node.children as any)[childKeys[0]!] as any[]).length === 1) {
     return transformExpr((node.children as any)[childKeys[0]!][0]);
   }
-
-  // ── Multi-child name-based fallback ───────────────────────────────────────────
-  if (node.name === 'expression' || node.name === 'assignmentExpression') {
-    const first = childKeys[0];
-    if (first) return transformExpr((node.children as any)[first][0]);
+  // Multi-child: take first non-punctuation child
+  const SKIP = new Set(['Semicolon','Comma','Dot','LParen','RParen','LCurly','RCurly','LSquareBracket','RSquareBracket']);
+  const useful = childKeys.filter(k => !SKIP.has(k));
+  if (useful.length > 0) {
+    return transformExpr((node.children as any)[useful[0]!][0]);
   }
 
-  // ── Last resort: walk all children looking for something we can parse ─────────
-  for (const key of childKeys) {
-    try { return transformExpr((node.children as any)[key][0]); } catch { /* try next */ }
-  }
-
-  throw new ParseError(`Unrecognised expression node "${node.name ?? tag}" at line ${loc(node).line}`);
+  throw new ParseError(`Unrecognised expression node "${name ?? 'unknown'}" at line ${loc(node).line}`);
 }
 
-// ── Literals ──────────────────────────────────────────────────────────────────
+// ── Leaf token → Expr ─────────────────────────────────────────────────────────
+
+function transformLeafToken(token: any): Expr {
+  const img = token.image as string;
+  const tn  = (token.tokenType?.name ?? '') as string;
+  const tnL = tn.toLowerCase();
+  if (img === 'true')  return { kind: 'BoolLiteral', value: true,  loc: loc(token) };
+  if (img === 'false') return { kind: 'BoolLiteral', value: false, loc: loc(token) };
+  if (img === 'null')  return { kind: 'NullLiteral',               loc: loc(token) };
+  if (img === 'this')  return { kind: 'ThisExpr',                  loc: loc(token) };
+  if (img.startsWith('"'))       return { kind: 'StringLiteral', value: parseStringLiteral(img), loc: loc(token) };
+  if (img.startsWith("'") && img.endsWith("'"))
+                                 return { kind: 'CharLiteral', value: img.slice(1,-1), loc: loc(token) };
+  if (tnL.includes('integer') || tnL.includes('decimal') || tnL.includes('float') ||
+      tnL.includes('double') || tnL.includes('hex') || /^\d/.test(img))
+    return transformLiteral(token);
+  if (tn === 'Identifier' || /^[a-zA-Z_$]/.test(img))
+    return { kind: 'VarExpr', name: img, loc: loc(token) };
+  throw new ParseError(`Unrecognised token "${img}" (${tn}) at line ${loc(token).line}`);
+}
+
+// ── binaryExpression ──────────────────────────────────────────────────────────
+// Covers: assignments (AssignmentOperator key), binary ops (BinaryOperator key),
+//         and single-operand passthrough.
+
+function transformBinaryExpr(node: any): Expr {
+  const c       = node.children ?? {};
+  const nodeLoc = loc(node);
+
+  // ── Assignment: key 'AssignmentOperator' ────────────────────────────────────
+  if (c.AssignmentOperator?.length) {
+    const lhsNode = c.unaryExpression?.[0];
+    const rhsNode = c.expression?.[0];
+    if (!lhsNode) throw new ParseError(`Assignment without LHS at line ${nodeLoc.line}`);
+    if (!rhsNode) throw new ParseError(`Assignment without RHS at line ${nodeLoc.line}`);
+    const lhs   = transformUnaryExpr(lhsNode);
+    const rhs   = transformExpr(rhsNode);
+    const opImg = (c.AssignmentOperator[0]?.image as string) ?? '=';
+    return buildAssignment(lhs, opImg, rhs, nodeLoc);
+  }
+
+  // ── Binary op: key 'BinaryOperator' ─────────────────────────────────────────
+  if (c.BinaryOperator?.length) {
+    const opMap: Record<string, BinaryOp> = {
+      '+': '+', '-': '-', '*': '*', '/': '/', '%': '%',
+      '==': '==', '!=': '!=', '<': '<', '>': '>', '<=': '<=', '>=': '>=',
+      '&&': '&&', '||': '||',
+    };
+    const opImg = c.BinaryOperator[0]?.image as string;
+    const op    = opMap[opImg];
+    if (!op) throw new ParseError(`Unknown binary operator "${opImg}" at line ${nodeLoc.line}`);
+    const operands: Expr[] = (c.unaryExpression ?? []).map(transformUnaryExpr);
+    if (operands.length < 2) throw new ParseError(`Binary op "${opImg}" needs ≥ 2 operands at line ${nodeLoc.line}`);
+    // Fold left-to-right for chains (a + b + c → ((a+b)+c))
+    let result = operands[0]!;
+    for (let i = 1; i < operands.length; i++) {
+      result = { kind: 'BinaryExpr', op, left: result, right: operands[i]!, loc: nodeLoc };
+    }
+    return result;
+  }
+
+  // ── Single unaryExpression — passthrough ─────────────────────────────────────
+  if (c.unaryExpression?.length === 1) return transformUnaryExpr(c.unaryExpression[0]);
+
+  // ── Fallback: single-child unwrap ────────────────────────────────────────────
+  const keys = Object.keys(c).filter(k => (c[k] as any[]).length > 0);
+  if (keys.length === 1 && (c[keys[0]!] as any[]).length === 1) {
+    return transformExpr(c[keys[0]!][0]);
+  }
+  throw new ParseError(`Unrecognised binaryExpression at line ${nodeLoc.line}`);
+}
+
+function buildAssignment(lhs: Expr, opImg: string, rhs: Expr, nodeLoc: SourceLoc): Expr {
+  // LHS must be a valid assignment target
+  if (!['VarExpr','FieldAccessExpr','StaticFieldAccessExpr'].includes(lhs.kind)) {
+    throw new ParseError(`Invalid assignment target "${lhs.kind}" at line ${nodeLoc.line}`);
+  }
+  const target = lhs as VarExpr | FieldAccessExpr | StaticFieldAccessExpr;
+  if (opImg === '=') return { kind: 'AssignExpr', target, value: rhs, loc: nodeLoc };
+  const compMap: Record<string, string> = {
+    '+=':'+=', '-=':'-=', '*=':'*=', '/=':'/=', '%=':'%=',
+  };
+  const compOp = compMap[opImg];
+  if (compOp) return { kind: 'CompoundAssignExpr', op: compOp as any, target, value: rhs, loc: nodeLoc };
+  throw new UnsupportedError(`${opImg} operator`, nodeLoc.line);
+}
+
+// ── unaryExpression ───────────────────────────────────────────────────────────
+// Handles: prefix !, -, + ; postfix ++ / -- (UnarySuffixOperator); plain primary.
+
+function transformUnaryExpr(node: any): Expr {
+  if (!node) throw new ParseError('Null unary expression');
+  if (node.name !== 'unaryExpression') return transformExpr(node);
+
+  const c       = node.children ?? {};
+  const nodeLoc = loc(node);
+
+  // Prefix operators (token keys: Not, Minus, Plus)
+  if (c.Not?.length) {
+    return { kind: 'UnaryExpr', op: '!', operand: transformPrimary(c.primary?.[0]), prefix: true, loc: nodeLoc };
+  }
+  if (c.Minus?.length) {
+    const inner = c.primary?.[0] ?? c.unaryExpression?.[0];
+    return { kind: 'UnaryExpr', op: '-', operand: transformExpr(inner), prefix: true, loc: nodeLoc };
+  }
+  if (c.Plus?.length) {
+    const inner = c.primary?.[0] ?? c.unaryExpression?.[0];
+    return transformExpr(inner); // unary + is a no-op
+  }
+  // Prefix ++ / --  (PlusPlus / MinusMinus token key)
+  if (c.PlusPlus?.length) {
+    const inner = c.primary?.[0] ?? c.unaryExpression?.[0];
+    return { kind: 'UnaryExpr', op: '++', operand: transformExpr(inner), prefix: true, loc: nodeLoc };
+  }
+  if (c.MinusMinus?.length) {
+    const inner = c.primary?.[0] ?? c.unaryExpression?.[0];
+    return { kind: 'UnaryExpr', op: '--', operand: transformExpr(inner), prefix: true, loc: nodeLoc };
+  }
+  // Postfix ++ / --  (key: UnarySuffixOperator)
+  if (c.UnarySuffixOperator?.length) {
+    const opImg = c.UnarySuffixOperator[0]?.image as string;
+    const op: UnaryOp = opImg === '++' ? '++' : '--';
+    return { kind: 'UnaryExpr', op, operand: transformPrimary(c.primary?.[0]), prefix: false, loc: nodeLoc };
+  }
+  // Plain primary
+  if (c.primary?.length) return transformPrimary(c.primary[0]);
+
+  // Single-child fallback
+  const keys = Object.keys(c).filter(k => (c[k] as any[]).length > 0);
+  if (keys.length === 1 && (c[keys[0]!] as any[]).length === 1) return transformExpr(c[keys[0]!][0]);
+  throw new ParseError(`Unrecognised unaryExpression at line ${nodeLoc.line}`);
+}
+
+// ── primary: primaryPrefix + primarySuffix[] chain ────────────────────────────
+// A primary is the atom of an expression.  primaryPrefix gives us the starting
+// node (This, literal, new, or a chain of identifiers via fqnOrRefType).
+// Zero or more primarySuffix nodes extend it (field access or method call).
+
+function transformPrimary(node: any): Expr {
+  if (!node) throw new ParseError('Null primary node');
+  if (node.name !== 'primary') return transformExpr(node);
+
+  const c       = node.children ?? {};
+  const nodeLoc = loc(node);
+  const prefixNode: any     = c.primaryPrefix?.[0];
+  const suffixNodes: any[]  = c.primarySuffix ?? [];
+
+  if (!prefixNode) throw new ParseError(`primary without prefix at line ${nodeLoc.line}`);
+
+  // ── Parse prefix ─────────────────────────────────────────────────────────────
+  let base: Expr | null        = null;   // resolved base expression
+  let fqnParts: string[] | null = null;  // chain of identifier parts not yet resolved
+  const pc = prefixNode.children ?? {};
+
+  if (pc.This) {
+    base = { kind: 'ThisExpr', loc: loc(pc.This[0]) };
+  } else if (pc.literal) {
+    base = transformLiteralNode(pc.literal[0]);
+  } else if (pc.newExpression) {
+    base = transformNewExpr(pc.newExpression[0]);
+  } else if (pc.fqnOrRefType) {
+    fqnParts = extractFqnParts(pc.fqnOrRefType[0]);
+  } else if (pc.LParen) {
+    // Parenthesized expression: ( expr )
+    const inner = pc.expression?.[0];
+    if (!inner) throw new ParseError(`Empty parenthesized expression at line ${nodeLoc.line}`);
+    base = transformExpr(inner);
+  } else if (pc.Super) {
+    // super in expression context (super.field) — handled by suffix
+    base = { kind: 'ThisExpr', loc: loc(pc.Super[0]) }; // approximate: treat as this
+  } else {
+    // Fallback: try first child token / rule
+    const keys = Object.keys(pc).filter(k => (pc[k] as any[]).length > 0);
+    if (keys.length > 0) {
+      const first = (pc[keys[0]!] as any[])[0];
+      base = first?.image !== undefined ? transformLeafToken(first) : transformExpr(first);
+    } else {
+      throw new ParseError(`Empty primaryPrefix at line ${nodeLoc.line}`);
+    }
+  }
+
+  // ── Process suffixes with lookahead ───────────────────────────────────────────
+  // Possible suffix shapes:
+  //   Dot + Identifier              — field read, OR method name before next suffix
+  //   methodInvocationSuffix(args)  — method call (method name came from fqnParts or prev suffix)
+  let pendingMethodName: string | null = null;
+
+  for (let i = 0; i < suffixNodes.length; i++) {
+    const suffix = suffixNodes[i];
+    const sc = suffix.children ?? {};
+
+    if (sc.methodInvocationSuffix?.length) {
+      // ── Method call ────────────────────────────────────────────────────────
+      const args = parseArgList(sc.methodInvocationSuffix[0]);
+
+      if (pendingMethodName !== null) {
+        // Method name came from previous Dot+Identifier suffix (e.g. this.method(args))
+        const mn = pendingMethodName;
+        pendingMethodName = null;
+        // base is already resolved
+        base = { kind: 'MethodCallExpr', receiver: base!, method: mn, args, loc: nodeLoc };
+      } else if (fqnParts !== null) {
+        // All-in-fqn case: obj.method(args) or area() or System.out.println
+        base = buildMethodCallFromFqn(fqnParts, args, nodeLoc);
+        fqnParts = null;
+      } else {
+        throw new ParseError(`Unexpected method call suffix at line ${nodeLoc.line}`);
+      }
+
+    } else {
+      // ── Dot + Identifier suffix ───────────────────────────────────────────
+      const ident = sc.Identifier?.[0]?.image as string | undefined;
+      if (!ident) continue; // skip unexpected suffix shapes
+
+      const nextSuffix    = suffixNodes[i + 1];
+      const nextIsCallArgs = !!(nextSuffix?.children?.methodInvocationSuffix?.length);
+
+      // Resolve fqnParts to a base expression first
+      if (fqnParts !== null) {
+        base = buildExprFromFqn(fqnParts, nodeLoc);
+        fqnParts = null;
+      }
+
+      if (nextIsCallArgs) {
+        // This identifier is a method name — save it, args come in next iteration
+        pendingMethodName = ident;
+      } else {
+        // Regular field access
+        base = { kind: 'FieldAccessExpr', object: base!, field: ident, loc: loc(suffix) };
+      }
+    }
+  }
+
+  // ── Resolve final state ────────────────────────────────────────────────────
+  if (fqnParts !== null) return buildExprFromFqn(fqnParts, nodeLoc);
+  if (base     !== null) return base;
+  throw new ParseError(`Could not resolve primary at line ${nodeLoc.line}`);
+}
+
+// ── FQN helpers ───────────────────────────────────────────────────────────────
+
+/** Extract all identifier parts from fqnOrRefType, e.g. ['System','out','println'] */
+function extractFqnParts(fqnNode: any): string[] {
+  if (!fqnNode) return [];
+  const parts: string[] = [];
+
+  // First part: fqnOrRefTypePartFirst → fqnOrRefTypePartCommon → Identifier
+  const first = child(fqnNode, 'fqnOrRefTypePartFirst');
+  if (first) {
+    const common = child(first, 'fqnOrRefTypePartCommon');
+    const id = tokenImage(common, 'Identifier');
+    if (id) parts.push(id);
+  } else {
+    // Fallback: direct Identifier
+    const id = tokenImage(fqnNode, 'Identifier');
+    if (id) parts.push(id);
+  }
+
+  // Rest parts: fqnOrRefTypePartRest[] → fqnOrRefTypePartCommon → Identifier
+  for (const rest of children(fqnNode, 'fqnOrRefTypePartRest')) {
+    const common = child(rest, 'fqnOrRefTypePartCommon');
+    const id = tokenImage(common, 'Identifier');
+    if (id) parts.push(id);
+  }
+
+  return parts;
+}
+
+/** Parse argument list from methodInvocationSuffix node */
+function parseArgList(mis: any): Expr[] {
+  const argList = child(mis, 'argumentList');
+  if (!argList) return [];
+  return children(argList, 'expression').map(transformExpr);
+}
+
+/**
+ * Build a method-call Expr from an FQN parts array where the LAST part is
+ * the method name and all preceding parts form the receiver.
+ * Examples:
+ *   ['area']                    → MethodCallExpr(ThisExpr, 'area', args)
+ *   ['obj', 'method']           → MethodCallExpr(VarExpr('obj'), 'method', args)
+ *   ['Cls', 'method']           → StaticMethodCallExpr('Cls', 'method', args)
+ *   ['System','out','println']  → PrintlnExpr(args)
+ */
+function buildMethodCallFromFqn(parts: string[], args: Expr[], nodeLoc: SourceLoc): Expr {
+  if (parts.length === 0) throw new ParseError('Empty FQN for method call');
+
+  // System.out.println special case
+  const joined = parts.join('.');
+  if (joined === 'System.out.println') return { kind: 'PrintlnExpr', args, loc: nodeLoc };
+  if (parts[0] === 'System') throw new UnsupportedError(`System.${parts.slice(1).join('.')}`, nodeLoc.line);
+
+  if (parts.length === 1) {
+    // Unqualified call: method() → this.method()
+    return { kind: 'MethodCallExpr', receiver: { kind: 'ThisExpr', loc: nodeLoc }, method: parts[0]!, args, loc: nodeLoc };
+  }
+
+  const method    = parts[parts.length - 1]!;
+  const qualParts = parts.slice(0, -1);
+
+  if (qualParts.length === 1) {
+    const qualifier = qualParts[0]!;
+    const isUpper   = /^[A-Z]/.test(qualifier);
+    if (isUpper) return { kind: 'StaticMethodCallExpr', className: qualifier, method, args, loc: nodeLoc };
+    return { kind: 'MethodCallExpr', receiver: { kind: 'VarExpr', name: qualifier, loc: nodeLoc }, method, args, loc: nodeLoc };
+  }
+
+  // 3+ part receiver chain: build a field-chain receiver, then call
+  const receiver = buildExprFromFqn(qualParts, nodeLoc);
+  return { kind: 'MethodCallExpr', receiver, method, args, loc: nodeLoc };
+}
+
+/**
+ * Build a plain field-access / variable Expr from FQN parts (no method call).
+ * Examples:
+ *   ['a']         → VarExpr('a')
+ *   ['f', 'x']    → FieldAccessExpr(VarExpr('f'), 'x')
+ *   ['Cls', 'f']  → StaticFieldAccessExpr('Cls', 'f')
+ */
+function buildExprFromFqn(parts: string[], nodeLoc: SourceLoc): Expr {
+  if (parts.length === 0) throw new ParseError('Empty FQN');
+  if (parts.length === 1) return { kind: 'VarExpr', name: parts[0]!, loc: nodeLoc };
+
+  const field     = parts[parts.length - 1]!;
+  const qualParts = parts.slice(0, -1);
+
+  if (qualParts.length === 1) {
+    const qualifier = qualParts[0]!;
+    const isUpper   = /^[A-Z]/.test(qualifier);
+    if (isUpper) return { kind: 'StaticFieldAccessExpr', className: qualifier, field, loc: nodeLoc };
+    return { kind: 'FieldAccessExpr', object: { kind: 'VarExpr', name: qualifier, loc: nodeLoc }, field, loc: nodeLoc };
+  }
+
+  // 3+ parts: build chain recursively
+  const object = buildExprFromFqn(qualParts, nodeLoc);
+  return { kind: 'FieldAccessExpr', object, field, loc: nodeLoc };
+}
+
+// ── literal node → Expr ───────────────────────────────────────────────────────
+// Called when we have the 'literal' rule node (not the raw token).
+
+function transformLiteralNode(literalNode: any): Expr {
+  const c = literalNode.children ?? {};
+  if (c.integerLiteral)       return transformLiteral(c.integerLiteral[0]);
+  if (c.floatingPointLiteral) return transformLiteral(c.floatingPointLiteral[0]);
+  if (c.booleanLiteral) {
+    const bl  = c.booleanLiteral[0];
+    const blc = bl.children ?? {};
+    if (blc.True)  return { kind: 'BoolLiteral', value: true,  loc: loc(blc.True[0]) };
+    if (blc.False) return { kind: 'BoolLiteral', value: false, loc: loc(blc.False[0]) };
+    return transformLiteral(bl);
+  }
+  if (c.characterLiteral) return transformLiteral(c.characterLiteral[0]);
+  if (c.StringLiteral) {
+    const t = c.StringLiteral[0];
+    return { kind: 'StringLiteral', value: parseStringLiteral(t.image), loc: loc(t) };
+  }
+  if (c.Null) return { kind: 'NullLiteral', loc: loc(c.Null[0]) };
+  if (c.True) return { kind: 'BoolLiteral', value: true,  loc: loc(c.True[0]) };
+  if (c.False)return { kind: 'BoolLiteral', value: false, loc: loc(c.False[0]) };
+  throw new ParseError(`Unknown literal node at line ${loc(literalNode).line}`);
+}
+
+// ── new object ────────────────────────────────────────────────────────────────
+// Called when we see primaryPrefix → newExpression.
+
+function transformNewExpr(newExprNode: any): Expr {
+  const uq = child(newExprNode, 'unqualifiedClassInstanceCreationExpression');
+  if (!uq) throw new UnsupportedError('qualified new expression', loc(newExprNode).line);
+  if (child(uq, 'classBody')) throw new UnsupportedError('anonymous class (Phase 6)', loc(uq).line);
+
+  const classType = child(uq, 'classOrInterfaceTypeToInstantiate');
+  const className = tokenImage(classType, 'Identifier') ??
+                    tokenImage(child(classType, 'typeIdentifier'), 'Identifier') ??
+                    extractTypeName(classType) ?? 'Unknown';
+  const argList = child(uq, 'argumentList');
+  const args    = argList ? children(argList, 'expression').map(transformExpr) : [];
+  return { kind: 'NewObjectExpr', className, args, loc: loc(uq) };
+}
+
+// ── Literals (raw token → Expr) ───────────────────────────────────────────────
+
 
 function transformLiteral(token: any): Expr {
   // If called with a CST rule node (has children but no image), unwrap to the leaf token.
@@ -766,265 +1075,6 @@ function parseStringLiteral(raw: string): string {
     .replace(/\\"/g, '"')
     .replace(/\\'/g, "'")
     .replace(/\\\\/g, '\\');
-}
-
-// ── Assignment ────────────────────────────────────────────────────────────────
-
-function transformAssignment(node: any): Expr {
-  const lhs      = child(node, 'leftHandSide') ?? children(node, 'expression')[0];
-  const op       = children(node, 'assignmentOperator')[0]?.children;
-  const opStr    = op ? Object.keys(op)[0] ?? '=' : '=';
-  const rhs      = children(node, 'expression').at(-1) ?? child(node, 'expression');
-
-  const target   = transformLHS(lhs ?? node.children?.expressionName?.[0]);
-  const value    = transformExpr(rhs);
-
-  if (opStr === 'Equals') {
-    return { kind: 'AssignExpr', target, value, loc: loc(node) };
-  }
-  // Compound: +=, -=, *=, /=, %=
-  const compoundMap: Record<string, string> = {
-    'PlusEquals': '+=', 'MinusEquals': '-=',
-    'StarEquals': '*=', 'SlashEquals': '/=',
-    'PercentEquals': '%=',
-  };
-  const compOp = compoundMap[opStr];
-  if (compOp) {
-    return { kind: 'CompoundAssignExpr', op: compOp as any, target, value, loc: loc(node) };
-  }
-  throw new UnsupportedError(`${opStr} assignment operator`, loc(node).line);
-}
-
-function transformLHS(node: any): Expr & { kind: 'VarExpr' | 'FieldAccessExpr' | 'StaticFieldAccessExpr' } {
-  if (!node) throw new ParseError('Null LHS');
-
-  // Simple identifier
-  if (node.children?.Identifier?.length === 1 && Object.keys(node.children).length === 1) {
-    return { kind: 'VarExpr', name: node.children.Identifier[0].image, loc: loc(node.children.Identifier[0]) };
-  }
-  if (node.children?.expressionName) return transformLHS(node.children.expressionName[0]);
-  if (node.name === 'expressionName') {
-    const ids = children(node, 'Identifier').map((t: any) => t.image);
-    if (ids.length === 1) return { kind: 'VarExpr', name: ids[0]!, loc: loc(node) };
-    if (ids.length === 2) {
-      // Could be this.field or ClassName.field or local.field
-      const qualifier = ids[0]!;
-      const field     = ids[1]!;
-      if (qualifier === 'this') {
-        return { kind: 'FieldAccessExpr', object: { kind: 'ThisExpr', loc: loc(node) }, field, loc: loc(node) };
-      }
-      // Assume static for now; interpreter will resolve
-      return { kind: 'StaticFieldAccessExpr', className: qualifier, field, loc: loc(node) };
-    }
-    if (ids.length > 2) throw new UnsupportedError('chained field access', loc(node).line);
-  }
-
-  // this.field
-  if (node.children?.This) {
-    const ids = children(node, 'Identifier');
-    if (ids.length === 1) {
-      return { kind: 'FieldAccessExpr', object: { kind: 'ThisExpr', loc: loc(node) }, field: ids[0].image, loc: loc(node) };
-    }
-  }
-
-  // Dot access on expr
-  if (node.children?.Dot) return transformFieldOrMethodAccess(node) as any;
-
-  // Array access — not supported
-  if (node.children?.LSquareBracket) throw new UnsupportedError('array access', loc(node).line);
-
-  throw new ParseError(`Cannot transform LHS at line ${loc(node).line}`);
-}
-
-// ── Method invocations ────────────────────────────────────────────────────────
-
-function transformMethodInvocation(node: any): Expr {
-  const argList = child(node, 'argumentList');
-  const args    = argList ? children(argList, 'expression').map(transformExpr) : [];
-  const ids     = children(node, 'Identifier').map((t: any) => t.image as string);
-  const hasSuper = !!node.children?.Super;
-  const hasThis  = !!node.children?.This;
-  const hasDot   = !!node.children?.Dot;
-  const nodeLoc  = loc(node);
-
-  // super.method(...)
-  if (hasSuper && hasDot) {
-    throw new UnsupportedError('super.method() calls (use overriding instead)', nodeLoc.line);
-  }
-
-  // Detect System.out.println
-  if (ids.join('.').endsWith('System.out.println') || ids.join('.') === 'println') {
-    return { kind: 'PrintlnExpr', args, loc: nodeLoc };
-  }
-  if (ids.join('.').includes('System.out.print')) {
-    throw new UnsupportedError('System.out.print (use println)', nodeLoc.line);
-  }
-  if (ids[0] === 'System') {
-    throw new UnsupportedError(`System.${ids.slice(1).join('.')}`, nodeLoc.line);
-  }
-
-  // Unqualified: method(args) → this.method(args)
-  if (ids.length === 1 && !hasDot) {
-    return { kind: 'MethodCallExpr', receiver: { kind: 'ThisExpr', loc: nodeLoc }, method: ids[0]!, args, loc: nodeLoc };
-  }
-
-  // TypeName.method(args) or expr.method(args)
-  if (ids.length === 2 && hasDot) {
-    const qualifier = ids[0]!;
-    const method    = ids[1]!;
-    // Treat as static if qualifier starts with uppercase (convention)
-    if (qualifier[0] === qualifier[0]?.toUpperCase() && qualifier[0] !== qualifier[0]?.toLowerCase()) {
-      return { kind: 'StaticMethodCallExpr', className: qualifier, method, args, loc: nodeLoc };
-    }
-    // Otherwise dynamic: qualifier is a variable
-    return { kind: 'MethodCallExpr', receiver: { kind: 'VarExpr', name: qualifier, loc: nodeLoc }, method, args, loc: nodeLoc };
-  }
-
-  // this.method(args)
-  if (hasThis && hasDot && ids.length === 1) {
-    return { kind: 'MethodCallExpr', receiver: { kind: 'ThisExpr', loc: nodeLoc }, method: ids[0]!, args, loc: nodeLoc };
-  }
-
-  // Chained call (a.b.c()) - not supported in Phase 1
-  if (ids.length > 2) throw new UnsupportedError('chained method calls', nodeLoc.line);
-
-  throw new ParseError(`Unrecognised method invocation at line ${nodeLoc.line}`);
-}
-
-function transformFieldOrMethodAccess(node: any): Expr {
-  // node has Dot tokens — could be field read or method call
-  const ids = children(node, 'Identifier').map((t: any) => t.image as string);
-  const nodeLoc = loc(node);
-
-  if (ids.length >= 2) {
-    const qualifier = ids[0]!;
-    const member    = ids[1]!;
-    const isUpper   = qualifier[0] === qualifier[0]?.toUpperCase() && qualifier[0] !== qualifier[0]?.toLowerCase();
-
-    if (isUpper) {
-      return { kind: 'StaticFieldAccessExpr', className: qualifier, field: member, loc: nodeLoc };
-    }
-    if (qualifier === 'this') {
-      return { kind: 'FieldAccessExpr', object: { kind: 'ThisExpr', loc: nodeLoc }, field: member, loc: nodeLoc };
-    }
-    return { kind: 'FieldAccessExpr', object: { kind: 'VarExpr', name: qualifier, loc: nodeLoc }, field: member, loc: nodeLoc };
-  }
-  throw new ParseError(`Cannot resolve dot access at line ${nodeLoc.line}`);
-}
-
-// ── new ───────────────────────────────────────────────────────────────────────
-
-function transformNewObject(node: any): Expr {
-  // Reject anonymous class bodies
-  if (child(node, 'classBody')) throw new UnsupportedError('anonymous class (Phase 6)', loc(node).line);
-  // Reject generic type args
-  if (child(node, 'typeArguments')) throw new UnsupportedError('generic type arguments', loc(node).line);
-  // Array creation
-  if (child(node, 'arrayCreatorRest') || child(node, 'dimExprs')) throw new UnsupportedError('array creation (Phase 5)', loc(node).line);
-
-  const classType = child(node, 'classOrInterfaceTypeToInstantiate') ??
-                    child(node, 'classType') ??
-                    child(node, 'fqnOrRefType');
-  const className = extractTypeName(classType);
-  const argList   = child(node, 'argumentList');
-  const args      = argList ? children(argList, 'expression').map(transformExpr) : [];
-  return { kind: 'NewObjectExpr', className, args, loc: loc(node) };
-}
-
-// ── Binary expressions ────────────────────────────────────────────────────────
-
-function transformBinary(node: any): Expr {
-  const c = node.children ?? {};
-  const nodeLoc = loc(node);
-
-  // ── Find operand arrays ──────────────────────────────────────────────────────
-  // java-parser places operands in arrays keyed by the sub-expression rule name.
-  // We try the most specific rules first, then fall back to 'expression'.
-  const operandKeys = [
-    'multiplicativeExpression', 'additiveExpression',
-    'shiftExpression', 'relationalExpression', 'equalityExpression',
-    'andExpression', 'exclusiveOrExpression', 'inclusiveOrExpression',
-    'conditionalAndExpression', 'conditionalOrExpression',
-    'unaryExpression', 'unaryExpressionNotPlusMinus',
-    'primaryNoNewArray', 'primary',
-    'conditionalExpression', 'expression',
-  ];
-
-  let operands: any[] = [];
-  for (const key of operandKeys) {
-    if (c[key]?.length) { operands = c[key]; break; }
-  }
-
-  // ── Find operator — by token IMAGE (robust across java-parser versions) ──────
-  const imageToOp: Record<string, BinaryOp> = {
-    '+': '+', '-': '-', '*': '*', '/': '/', '%': '%',
-    '==': '==', '!=': '!=', '<': '<', '>': '>', '<=': '<=', '>=': '>=',
-    '&&': '&&', '||': '||',
-  };
-  // Also keep a name-based fallback for older versions
-  const nameToOp: Record<string, BinaryOp> = {
-    'Plus': '+', 'Minus': '-', 'Star': '*', 'Slash': '/', 'Percent': '%',
-    'EqualsEquals': '==', 'Equals': '==', 'NotEquals': '!=',
-    'Less': '<', 'Greater': '>', 'LessEquals': '<=', 'GreaterEquals': '>=',
-    'AndAnd': '&&', 'OrOr': '||',
-  };
-
-  let op: BinaryOp | undefined;
-  // Image-based: scan every children key for a known operator image
-  outer: for (const arr of Object.values(c) as any[][]) {
-    if (!Array.isArray(arr)) continue;
-    for (const t of arr) {
-      if (t?.image && imageToOp[t.image]) { op = imageToOp[t.image]; break outer; }
-    }
-  }
-  // Name-based fallback
-  if (!op) {
-    for (const [tokenName, binOp] of Object.entries(nameToOp)) {
-      if (c[tokenName]?.length) { op = binOp; break; }
-    }
-  }
-
-  if (!op || operands.length < 2) {
-    if (operands.length === 1) return transformExpr(operands[0]);
-    // Fall through to single-child scan
-    const keys = Object.keys(c).filter(k => (c[k] as any[]).length > 0);
-    if (keys.length === 1 && (c[keys[0]!] as any[]).length === 1) return transformExpr(c[keys[0]!][0]);
-    throw new ParseError(`Cannot resolve binary expression "${node.name}" at line ${nodeLoc.line}`);
-  }
-
-  // Fold left-to-right for chains (a + b + c)
-  let result = transformExpr(operands[0]!);
-  for (let i = 1; i < operands.length; i++) {
-    result = { kind: 'BinaryExpr', op, left: result, right: transformExpr(operands[i]!), loc: nodeLoc };
-  }
-  return result;
-}
-
-// ── Unary expressions ─────────────────────────────────────────────────────────
-
-function transformUnary(node: any): Expr {
-  const c = node.children ?? {};
-  const nodeLoc = loc(node);
-
-  if (c.Minus) {
-    const operand = children(node, 'unaryExpression')[0] ?? children(node, 'unaryExpressionNotPlusMinus')[0];
-    return { kind: 'UnaryExpr', op: '-', operand: transformExpr(operand), prefix: true, loc: nodeLoc };
-  }
-  if (c.Exclamation) {
-    const operand = children(node, 'unaryExpression')[0] ?? children(node, 'unaryExpressionNotPlusMinus')[0];
-    return { kind: 'UnaryExpr', op: '!', operand: transformExpr(operand), prefix: true, loc: nodeLoc };
-  }
-  // Plus — no-op unary plus
-  if (c.Plus) {
-    const operand = children(node, 'unaryExpression')[0];
-    return transformExpr(operand);
-  }
-
-  // Unwrap single child
-  const keys = Object.keys(c).filter(k => !['LParen','RParen'].includes(k));
-  if (keys.length === 1 && c[keys[0]!]?.length === 1) return transformExpr(c[keys[0]!][0]);
-
-  throw new ParseError(`Unrecognised unary expression at line ${nodeLoc.line}`);
 }
 
 // ── Type transformer ──────────────────────────────────────────────────────────

@@ -1,9 +1,11 @@
-import type { HeapObject, HighlightTarget } from '@jvm-viz/engine';
+import { useState } from 'react';
+import type { HeapObject, HighlightTarget, Arrow } from '@jvm-viz/engine';
 import { formatValue } from '../utils/formatValue.js';
 
 interface Props {
   objects:    HeapObject[];
   highlights: HighlightTarget[];
+  arrows:     Arrow[];
 }
 
 function isHighlighted(highlights: HighlightTarget[], objectId: string, field?: string): boolean {
@@ -12,26 +14,64 @@ function isHighlighted(highlights: HighlightTarget[], objectId: string, field?: 
   );
 }
 
-export function HeapPanel({ objects, highlights }: Props) {
+function activeHeapIds(arrows: Arrow[], highlights: HighlightTarget[]): Set<string> {
+  const ids = new Set<string>();
+  for (const a of arrows) {
+    if (a.from.region === 'heap') ids.add(a.from.elementId);
+    if (a.to.region   === 'heap') ids.add(a.to.elementId);
+  }
+  for (const h of highlights) {
+    if (h.region === 'heap') ids.add(h.elementId);
+  }
+  return ids;
+}
+
+export function HeapPanel({ objects, highlights, arrows }: Props) {
+  const [openOverrides, setOpenOverrides] = useState<Record<string, boolean>>({});
+
   if (objects.length === 0) {
     return <p className="empty-state">Empty heap</p>;
+  }
+
+  const active = activeHeapIds(arrows, highlights);
+
+  function isOpen(objectId: string): boolean {
+    return objectId in openOverrides
+      ? (openOverrides[objectId] ?? false)
+      : active.has(objectId);
+  }
+
+  function toggle(objectId: string) {
+    setOpenOverrides(prev => ({ ...prev, [objectId]: !isOpen(objectId) }));
   }
 
   return (
     <>
       {objects.map(obj => {
         const highlighted = isHighlighted(highlights, obj.objectId);
+        const expanded    = isOpen(obj.objectId);
         return (
           <div
             key={obj.objectId}
             id={`heap-${obj.objectId}`}
             className={`heap-card${highlighted ? ' is-highlighted' : ''}`}
           >
-            <div className="heap-card__header">
+            <button
+              className="heap-card__header heap-card__header--btn"
+              onClick={() => toggle(obj.objectId)}
+              aria-expanded={expanded}
+              aria-label={`${expanded ? 'Collapse' : 'Expand'} ${obj.objectId}`}
+            >
               <span className="heap-card__klass">{obj.klassName}</span>
-              <span className="heap-card__id">{obj.objectId}</span>
-            </div>
-            {obj.fields.length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span className="heap-card__id">{obj.objectId}</span>
+                <span className={`klass-card__chevron${expanded ? ' klass-card__chevron--open' : ''}`}>
+                  ›
+                </span>
+              </div>
+            </button>
+
+            {expanded && obj.fields.length > 0 && (
               <div className="heap-card__body">
                 {obj.fields.map(field => {
                   const fmted = formatValue(field.value);

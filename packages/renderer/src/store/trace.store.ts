@@ -54,6 +54,8 @@ interface TraceActions {
 
   // Toast
   dismissToast:   () => void;
+  // Editing
+  clearExecution: () => void;
 }
 
 export type TraceStore = TraceState & TraceActions;
@@ -110,9 +112,19 @@ export const useTraceStore = create<TraceStore>()(
         });
       },
 
-      setMode: (mode) => set({ mode }),
+      setMode: (mode) => set({
+        mode,
+        // Switching to custom always starts clean — don't bleed example trace into custom view
+        ...(mode === 'custom' ? { status: 'idle', steps: [], error: null, stepIndex: 0, toast: null } : {}),
+      }),
 
-      setCustomSource: (src) => set({ customSource: src }),
+      setCustomSource: (src) => set({
+        customSource: src,
+        // Editing the source invalidates the current trace
+        status: 'idle', steps: [], error: null, stepIndex: 0, toast: null,
+      }),
+
+      clearExecution: () => set({ status: 'idle', steps: [], error: null, stepIndex: 0, toast: null }),
 
       setStepIndex: (i) => {
         const { steps } = get();

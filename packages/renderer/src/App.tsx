@@ -10,6 +10,8 @@ import { CodePanel }       from './components/CodePanel.js';
 import { ResizeHandle }    from './components/ResizeHandle.js';
 import { ErrorToast }      from './components/ErrorToast.js';
 import { CustomEditor }    from './components/CustomEditor.js';
+import { SupportMatrix }   from './components/SupportMatrix.js';
+import { ErrorCard }       from './components/ErrorCard.js';
 
 // ── Layout persistence ────────────────────────────────────────────────────────
 
@@ -38,13 +40,15 @@ export function App() {
 
   const {
     mode, exampleIdx, customSource, status, steps, error: execError, stepIndex,
-    selectExample, setMode, setCustomSource, stepForward, stepBack,
+    selectExample, setMode, setCustomSource, stepForward, stepBack, clearExecution,
   } = useTraceStore();
 
   const { run } = useInterpreter();
 
   const step       = steps[stepIndex];
   const totalSteps = steps.length;
+
+  const [showSupport, setShowSupport] = useState(false);
 
   // Layout (localStorage-persisted, independent of trace state)
   const [layout, setLayout] = useState<LayoutState>(loadLayout);
@@ -87,6 +91,7 @@ export function App() {
   return (
     <div className="app">
       <ErrorToast />
+      <SupportMatrix open={showSupport} onClose={() => setShowSupport(false)} />
 
       {/* ── Toolbar ──────────────────────────────────────────────────────── */}
       <header className="toolbar" role="banner">
@@ -117,6 +122,16 @@ export function App() {
             {status === 'error'   && execError && `⚠ ${errorSummary(execError).slice(0, 60)}`}
           </span>
         )}
+
+        <button
+          className={`toolbar__support-btn${showSupport ? ' toolbar__support-btn--active' : ''}`}
+          onClick={() => setShowSupport(s => !s)}
+          aria-label="Toggle language subset reference"
+          aria-expanded={showSupport}
+          title="Java subset supported by this visualizer"
+        >
+          <span className="toolbar__support-check">✓</span> supported
+        </button>
 
         <nav className="stepper" aria-label="Step navigation" style={{ marginLeft: 'auto' }}>
           <button className="stepper__btn" onClick={goPrev} disabled={stepIndex === 0}
@@ -155,7 +170,7 @@ export function App() {
             <div className="region-panel__body">
               {noStep
                 ? <p className="empty-state">&nbsp;</p>
-                : <HeapPanel objects={step.heap} highlights={highlights} />}
+                : <HeapPanel objects={step.heap} highlights={highlights} arrows={step.arrows} />}
             </div>
           </section>
 
@@ -169,7 +184,7 @@ export function App() {
             <div className="region-panel__body">
               {noStep
                 ? <p className="empty-state">&nbsp;</p>
-                : <MetaspacePanel klasses={step.metaspace} highlights={highlights} />}
+                : <MetaspacePanel klasses={step.metaspace} highlights={highlights} arrows={step.arrows} />}
             </div>
           </section>
         </div>
@@ -180,7 +195,7 @@ export function App() {
         <div className="code-panel" aria-label="Source code and step info"
           style={{ height: codeH, gridTemplateColumns: `1fr ${infoW}px` }}>
 
-          {/* Left header — only shown in example mode (custom editor has its own) */}
+          {/* Left header */}
           {mode === 'example' ? (
             <div className="code-panel__code-header">
               <span className="code-panel__label">source</span>
@@ -190,7 +205,28 @@ export function App() {
                 </span>
               )}
             </div>
+          ) : steps.length > 0 ? (
+            /* Custom — viewing mode: show line indicator + edit/re-run controls */
+            <div className="code-panel__code-header">
+              <button className="code-panel__edit-btn" onClick={clearExecution} title="Return to editor">
+                ◀ edit
+              </button>
+              {step?.sourceLineNumber != null && (
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--region-heap)', marginLeft: 'auto' }}>
+                  ► line {step.sourceLineNumber}
+                </span>
+              )}
+              <button
+                className={`run-btn${status === 'running' ? ' run-btn--running' : ''}`}
+                onClick={() => run(customSource)}
+                disabled={status === 'running' || !customSource.trim()}
+                style={{ marginLeft: step?.sourceLineNumber != null ? undefined : 'auto' }}
+              >
+                {status === 'running' ? '⏳' : '▶ Run'}
+              </button>
+            </div>
           ) : (
+            /* Custom — edit mode: CustomEditor has its own header */
             <div className="code-panel__code-header" style={{ padding: 0, borderBottom: 'none' }} />
           )}
 
@@ -204,7 +240,11 @@ export function App() {
           <div className="code-panel__code-body" style={{ position: 'relative' }}>
             {mode === 'example' ? (
               <CodePanel sourceCode={displaySource} activeLineNumber={step?.sourceLineNumber ?? null} />
+            ) : steps.length > 0 ? (
+              /* Custom — viewing: read-only code with active line highlighted */
+              <CodePanel sourceCode={customSource} activeLineNumber={step?.sourceLineNumber ?? null} />
             ) : (
+              /* Custom — editing: textarea */
               <CustomEditor
                 value={customSource}
                 onChange={setCustomSource}
@@ -220,10 +260,10 @@ export function App() {
           {/* Right body */}
           <div className={`code-panel__info-body${hasError ? ' code-panel__info-body--error' : ''}`}>
             {hasError && execError && (
-              <div className="error-step-badge">
-                <span className="error-step-badge__icon">⚠</span>
-                <span>{errorSummary(execError)}</span>
-              </div>
+              <ErrorCard
+                error={execError}
+                onOpenSubset={() => setShowSupport(true)}
+              />
             )}
             {step?.delta && (
               <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
