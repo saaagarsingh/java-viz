@@ -1,7 +1,7 @@
 import { useRef, useCallback, useEffect, useState } from 'react';
 import { traces }          from '@jvm-viz/engine';
 import type { Arrow } from '@jvm-viz/engine';
-import { useTraceStore, errorSummary } from './store/trace.store.js';
+import { useTraceStore } from './store/trace.store.js';
 import { useInterpreter }  from './hooks/useInterpreter.js';
 import { StackPanel }      from './components/StackPanel.js';
 import { HeapPanel }       from './components/HeapPanel.js';
@@ -121,21 +121,9 @@ export function App() {
     return () => window.removeEventListener('keydown', handler);
   }, [goNext, goPrev]);
 
-  // Bootstrap example on first load
-  useEffect(() => {
-    if (status === 'idle' && mode === 'example') selectExample(exampleIdx);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const currentTrace  = traces[exampleIdx];
   const displaySource = mode === 'example' ? (currentTrace?.sourceCode ?? '') : customSource;
   const hasError      = status === 'error' && !!execError;
-  const looksLikeThreadUsage = /\bThread\b|\.start\s*\(/.test(customSource);
-  const shouldShowThreadHint =
-    mode === 'custom' &&
-    status === 'done' &&
-    pendingThreads.length === 0 &&
-    looksLikeThreadUsage;
 
   const highlights   = step?.delta?.highlightedElements ?? [];
   const fadingArrows = step?.delta?.fadingArrows ?? [];
@@ -187,22 +175,9 @@ export function App() {
         {mode === 'example' && (
           <select className="toolbar__example-select" value={exampleIdx}
             onChange={e => selectExample(Number(e.target.value))} aria-label="Select example program">
+            <option value={-1}>Select example...</option>
             {traces.map((t, i) => <option key={t.id} value={i}>{i + 1}. {t.title}</option>)}
           </select>
-        )}
-
-        {mode === 'custom' && status !== 'idle' && (
-          <span className={`status-banner status-banner--${status}`}>
-            {status === 'running' && '⏳ running…'}
-            {status === 'done'    && `✓ ${totalSteps} steps`}
-            {status === 'error'   && execError && '⚠ Error occurred'}
-          </span>
-        )}
-
-        {shouldShowThreadHint && (
-          <span className="status-banner" title="Thread scheduling hint">
-            ℹ thread code detected: Thread.start() and Thread.join() are supported for basic scheduling in this phase
-          </span>
         )}
 
         {mode === 'custom' && status === 'done' && pendingThreads.length > 0 && (

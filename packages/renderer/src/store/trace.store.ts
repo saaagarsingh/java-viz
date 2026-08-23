@@ -90,19 +90,19 @@ export function errorSummary(e: ExecutionError): string {
 
 // We persist only the user-authored content and preferences.
 // Execution results are always re-derived.
-const PERSIST_KEYS: (keyof TraceState)[] = ['customSource', 'lang', 'mode', 'exampleIdx'];
+const PERSIST_KEYS: (keyof TraceState)[] = ['customSource', 'lang', 'mode'];
 
 export const useTraceStore = create<TraceStore>()(
   persist(
     (set, get) => ({
       // ── initial state ────────────────────────────────────────────
       mode:         'example',
-      exampleIdx:   0,
+      exampleIdx:   -1,
       customSource: '',
       lang:         'java',
 
       status:    'idle',
-      steps:     traces[0]?.steps ?? [],
+      steps:     [],
       error:     null,
       stepIndex: 0,
       toast:     null,
@@ -112,7 +112,20 @@ export const useTraceStore = create<TraceStore>()(
       // ── actions ──────────────────────────────────────────────────
       selectExample: (idx) => {
         const t = traces[idx];
-        if (!t) return;
+        if (!t) {
+          set({
+            exampleIdx: -1,
+            mode: 'example',
+            status: 'idle',
+            steps: [],
+            error: null,
+            stepIndex: 0,
+            toast: null,
+            pendingThreads: [],
+            selectedThreadId: null,
+          });
+          return;
+        }
         set({
           exampleIdx: idx,
           mode:       'example',
@@ -126,11 +139,48 @@ export const useTraceStore = create<TraceStore>()(
         });
       },
 
-      setMode: (mode) => set({
-        mode,
-        // Switching to custom always starts clean — don't bleed example trace into custom view
-        ...(mode === 'custom' ? { status: 'idle', steps: [], error: null, stepIndex: 0, toast: null, pendingThreads: [], selectedThreadId: null } : {}),
-      }),
+      setMode: (mode) => {
+        if (mode === 'custom') {
+          set({
+            mode,
+            status: 'idle',
+            steps: [],
+            error: null,
+            stepIndex: 0,
+            toast: null,
+            pendingThreads: [],
+            selectedThreadId: null,
+          });
+          return;
+        }
+
+        const idx = get().exampleIdx;
+        const t = traces[idx];
+        if (!t) {
+          set({
+            mode,
+            status: 'idle',
+            steps: [],
+            error: null,
+            stepIndex: 0,
+            toast: null,
+            pendingThreads: [],
+            selectedThreadId: null,
+          });
+          return;
+        }
+
+        set({
+          mode,
+          steps: t.steps,
+          error: null,
+          stepIndex: 0,
+          status: 'done',
+          toast: null,
+          pendingThreads: [],
+          selectedThreadId: null,
+        });
+      },
 
       setCustomSource: (src) => set({
         customSource: src,
