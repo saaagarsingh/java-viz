@@ -31,7 +31,7 @@ export function CodePanel({ sourceCode, activeLineNumber }: Props) {
 
   // Scroll active line into view whenever it changes
   useEffect(() => {
-    activeRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    activeRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }, [activeLineNumber]);
 
   const lines = sourceCode.split('\n');

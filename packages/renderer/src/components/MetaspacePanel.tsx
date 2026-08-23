@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import type { KlassInfo, HighlightTarget, Arrow } from '@jvm-viz/engine';
+import type { KlassInfo, HighlightTarget, Arrow, HeapObject } from '@jvm-viz/engine';
 import { formatValue } from '../utils/formatValue.js';
 
 interface Props {
   klasses:    KlassInfo[];
   highlights: HighlightTarget[];
   arrows:     Arrow[];
+  heap:       HeapObject[];
 }
 
 function isHighlighted(highlights: HighlightTarget[], klassName: string, field?: string): boolean {
@@ -27,9 +28,12 @@ function activeMetaspaceIds(arrows: Arrow[], highlights: HighlightTarget[]): Set
   return ids;
 }
 
-export function MetaspacePanel({ klasses, highlights, arrows }: Props) {
+export function MetaspacePanel({ klasses, highlights, arrows, heap }: Props) {
   // openOverrides: explicit user toggles that override the auto-expand logic
   const [openOverrides, setOpenOverrides] = useState<Record<string, boolean>>({});
+  const objectLabels = new Map<string, string>(
+    heap.map(o => [o.objectId, `${o.klassName}#${o.objectId.replace(/^obj-/, '')}`])
+  );
 
   if (klasses.length === 0) {
     return <p className="empty-state">No classes loaded</p>;
@@ -103,7 +107,7 @@ export function MetaspacePanel({ klasses, highlights, arrows }: Props) {
                   <div>
                     <div className="klass-card__section-label">static fields</div>
                     {klass.staticFields.map(f => {
-                      const fmted = formatValue(f.value);
+                      const fmted = formatValue(f.value, { objectLabels, refDisplay: 'compact' });
                       const fieldHighlighted = isHighlighted(highlights, klass.klassName, f.name);
                       return (
                         <div

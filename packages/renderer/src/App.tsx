@@ -1,5 +1,6 @@
 import { useRef, useCallback, useEffect, useState } from 'react';
 import { traces }          from '@jvm-viz/engine';
+import type { Arrow } from '@jvm-viz/engine';
 import { useTraceStore, errorSummary } from './store/trace.store.js';
 import { useInterpreter }  from './hooks/useInterpreter.js';
 import { StackPanel }      from './components/StackPanel.js';
@@ -19,25 +20,70 @@ import { ErrorCard }       from './components/ErrorCard.js';
 const LAYOUT_KEY = 'jvm-viz-layout';
 const COL_MIN    = 160;
 
-interface LayoutState { col1: number; col2: number; codeH: number; infoW: number; }
+interface LayoutState {
+  stackW: number;
+  metaspaceW: number;
+  codeH: number;
+  logW: number;
+  logsOpen: boolean;
+}
 
 function loadLayout(): LayoutState {
   try {
     const raw = localStorage.getItem(LAYOUT_KEY);
-    if (raw) return JSON.parse(raw) as LayoutState;
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<LayoutState> & {
+        col1?: number;
+        col2?: number;
+        infoW?: number;
+      };
+      const vw = window.innerWidth;
+      return {
+        stackW: parsed.stackW ?? parsed.col1 ?? Math.floor(vw * 0.34),
+        metaspaceW: parsed.metaspaceW ?? parsed.col2 ?? Math.floor(vw * 0.30),
+        codeH: parsed.codeH ?? 280,
+        logW: parsed.logW ?? parsed.infoW ?? Math.floor(vw * 0.30),
+        logsOpen: parsed.logsOpen ?? true,
+      };
+    }
   } catch { /* ignore */ }
-  const vw  = window.innerWidth;
-  const col = Math.floor((vw - 8) / 3);
-  return { col1: col, col2: col, codeH: 280, infoW: Math.floor(vw * 0.28) };
+  const vw = window.innerWidth;
+  return {
+    stackW: Math.floor(vw * 0.34),
+    metaspaceW: Math.floor(vw * 0.30),
+    codeH: 280,
+    logW: Math.floor(vw * 0.30),
+    logsOpen: true,
+  };
 }
 function saveLayout(l: LayoutState) {
   try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(l)); } catch { /* ignore */ }
+}
+
+interface HeapRefSelection {
+  sourceObjectId: string;
+  fieldName: string;
+  targetObjectId: string;
+}
+
+function isHeapReferenceArrow(a: Arrow): boolean {
+  return a.from.region === 'heap' && a.to.region === 'heap' && typeof a.from.fieldName === 'string';
+}
+
+function isSelectedHeapReferenceArrow(a: Arrow, sel: HeapRefSelection | null): boolean {
+  if (!sel) return false;
+  return a.from.region === 'heap'
+    && a.to.region === 'heap'
+    && a.from.elementId === sel.sourceObjectId
+    && a.from.fieldName === sel.fieldName
+    && a.to.elementId === sel.targetObjectId;
 }
 
 // ── App ───────────────────────────────────────────────────────────────────────
 
 export function App() {
   const mainRef = useRef<HTMLDivElement | null>(null);
+  const logBodyRef = useRef<HTMLDivElement | null>(null);
 
   const {
     mode, exampleIdx, customSource, status, steps, error: execError, stepIndex,
@@ -51,6 +97,8 @@ export function App() {
   const totalSteps = steps.length;
 
   const [showSupport, setShowSupport] = useState(false);
+  const [showHeapRefArrows, setShowHeapRefArrows] = useState(false);
+  const [revealedHeapRef, setRevealedHeapRef] = useState<HeapRefSelection | null>(null);
 
   // Layout (localStorage-persisted, independent of trace state)
   const [layout, setLayout] = useState<LayoutState>(loadLayout);
@@ -58,7 +106,7 @@ export function App() {
     setLayout(prev => { const next = { ...prev, ...patch }; saveLayout(next); return next; });
   }, []);
   const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
-  const { col1, col2, codeH, infoW } = layout;
+  const { stackW, metaspaceW, codeH, logW, logsOpen } = layout;
 
   // Keyboard nav — skip when textarea is focused
   const goPrev = useCallback(() => stepBack(),    [stepBack]);
@@ -91,6 +139,27 @@ export function App() {
 
   const highlights   = step?.delta?.highlightedElements ?? [];
   const fadingArrows = step?.delta?.fadingArrows ?? [];
+  const allArrows = step?.arrows ?? [];
+  const visibleArrows = allArrows.filter(a => {
+    if (!isHeapReferenceArrow(a)) return true;
+    if (showHeapRefArrows) return true;
+    return isSelectedHeapReferenceArrow(a, revealedHeapRef);
+  });
+  const stepLogLines = steps
+    .slice(0, stepIndex + 1)
+    .map((s, i) => `${i + 1}. ${s.delta?.description ?? s.label}`);
+
+  // Keep the newest appended log line visible while stepping.
+  useEffect(() => {
+    if (!logsOpen) return;
+    const el = logBodyRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  }, [logsOpen, stepIndex, stepLogLines.length]);
+
+  useEffect(() => {
+    setRevealedHeapRef(null);
+  }, [stepIndex]);
 
   // Empty-state content shown in memory panels when there's no step yet
   const noStep = !step;
@@ -179,6 +248,26 @@ export function App() {
           <span className="toolbar__support-check">✓</span> supported
         </button>
 
+        <button
+          className="toolbar__logs-btn"
+          onClick={() => updateLayout({ logsOpen: !logsOpen })}
+          aria-label={logsOpen ? 'Close logs panel' : 'Open logs panel'}
+          aria-expanded={logsOpen}
+          title={logsOpen ? 'Close logs panel' : 'Open logs panel'}
+        >
+          {logsOpen ? 'Hide logs' : 'Show logs'}
+        </button>
+
+        <button
+          className="toolbar__logs-btn"
+          onClick={() => setShowHeapRefArrows(v => !v)}
+          aria-label={showHeapRefArrows ? 'Hide heap reference arrows' : 'Show heap reference arrows'}
+          aria-pressed={showHeapRefArrows}
+          title={showHeapRefArrows ? 'Hide heap reference arrows' : 'Show heap reference arrows'}
+        >
+          {showHeapRefArrows ? 'Heap refs on' : 'Heap refs off'}
+        </button>
+
         <nav className="stepper" aria-label="Step navigation" style={{ marginLeft: 'auto' }}>
           <button className="stepper__btn" onClick={goPrev} disabled={stepIndex === 0}
             aria-label="Previous step" title="← Previous step">‹</button>
@@ -189,68 +278,67 @@ export function App() {
       </header>
 
       {/* ── Main ─────────────────────────────────────────────────────────── */}
-      <main className="main-content" ref={mainRef} aria-label="Memory state"
-        style={{ display: 'flex', flexDirection: 'column' }}>
+      <main className="main-content main-content--split" ref={mainRef} aria-label="Memory state">
+        <section className="workspace-column" aria-label="Stack heap workspace">
+          {/* ── Memory row ──────────────────────────────────────────────── */}
+          <div className="memory-row memory-row--workspace" style={{ minHeight: 0 }}>
+            <section className="region-panel region-panel--stack" aria-label="Stack"
+              style={{ width: stackW, minWidth: COL_MIN, flexShrink: 0 }}>
+              <div className="region-panel__header">
+                <div className="region-panel__dot" /><span className="region-panel__name">Stack</span>
+              </div>
+              <div className="region-panel__body">
+                {noStep
+                  ? <p className="empty-state">{status === 'running' ? '⏳ running…' : status === 'error' ? '⚠ error — see logs' : 'no trace'}</p>
+                  : <StackPanel
+                      frames={step.stack}
+                      highlights={highlights}
+                      heap={step.heap}
+                      {...(step.threadStates ? { threadStates: step.threadStates } : {})}
+                      {...(step.threadDisplayNames ? { threadDisplayNames: step.threadDisplayNames } : {})}
+                    />}
+              </div>
+            </section>
 
-        {/* ── Memory row ────────────────────────────────────────────────── */}
-        <div className="memory-row" style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-          <section className="region-panel region-panel--stack" aria-label="Stack"
-            style={{ width: col1, minWidth: COL_MIN, flexShrink: 0 }}>
-            <div className="region-panel__header">
-              <div className="region-panel__dot" /><span className="region-panel__name">Stack</span>
-            </div>
-            <div className="region-panel__body">
-              {noStep
-                ? <p className="empty-state">{status === 'running' ? '⏳ running…' : status === 'error' ? '⚠ error — see step info' : 'no trace'}</p>
-                : <StackPanel
-                    frames={step.stack}
-                    highlights={highlights}
-                    heap={step.heap}
-                    {...(step.threadStates ? { threadStates: step.threadStates } : {})}
-                    {...(step.threadDisplayNames ? { threadDisplayNames: step.threadDisplayNames } : {})}
-                  />}
-            </div>
-          </section>
+            <ResizeHandle axis="x" onResize={d => updateLayout({ stackW: clamp(stackW + d, COL_MIN, 720) })} />
 
-          <ResizeHandle axis="x" onResize={d => updateLayout({ col1: clamp(col1 + d, COL_MIN, 600) })} />
+            <section className="region-panel region-panel--heap" aria-label="Heap" style={{ flex: 1, minWidth: COL_MIN }}>
+              <div className="region-panel__header">
+                <div className="region-panel__dot" /><span className="region-panel__name">Heap</span>
+              </div>
+              <div className="region-panel__body">
+                {noStep
+                  ? <p className="empty-state">&nbsp;</p>
+                  : <HeapPanel
+                      objects={step.heap}
+                      highlights={highlights}
+                      arrows={step.arrows}
+                      showHeapRefArrows={showHeapRefArrows}
+                      onRevealReference={(sourceObjectId, fieldName, targetObjectId) => {
+                        setRevealedHeapRef(prev => {
+                          if (prev
+                            && prev.sourceObjectId === sourceObjectId
+                            && prev.fieldName === fieldName
+                            && prev.targetObjectId === targetObjectId) {
+                            return null;
+                          }
+                          return { sourceObjectId, fieldName, targetObjectId };
+                        });
+                      }}
+                      {...(step.delta?.monitorOperation ? { monitorObjectId: step.delta.monitorOperation.objectId } : {})}
+                    />}
+              </div>
+            </section>
+          </div>
 
-          <section className="region-panel region-panel--heap" aria-label="Heap"
-            style={{ width: col2, minWidth: COL_MIN, flexShrink: 0 }}>
-            <div className="region-panel__header">
-              <div className="region-panel__dot" /><span className="region-panel__name">Heap</span>
-            </div>
-            <div className="region-panel__body">
-              {noStep
-                ? <p className="empty-state">&nbsp;</p>
-                : <HeapPanel
-                    objects={step.heap}
-                    highlights={highlights}
-                    arrows={step.arrows}
-                    {...(step.delta?.monitorOperation ? { monitorObjectId: step.delta.monitorOperation.objectId } : {})}
-                  />}
-            </div>
-          </section>
+          <ResizeHandle axis="y" onResize={d => updateLayout({ codeH: clamp(codeH - d, 120, 560) })} />
 
-          <ResizeHandle axis="x" onResize={d => updateLayout({ col2: clamp(col2 + d, COL_MIN, 700) })} />
-
-          <section className="region-panel region-panel--metaspace" aria-label="Metaspace"
-            style={{ flex: 1, minWidth: COL_MIN }}>
-            <div className="region-panel__header">
-              <div className="region-panel__dot" /><span className="region-panel__name">Metaspace</span>
-            </div>
-            <div className="region-panel__body">
-              {noStep
-                ? <p className="empty-state">&nbsp;</p>
-                : <MetaspacePanel klasses={step.metaspace} highlights={highlights} arrows={step.arrows} />}
-            </div>
-          </section>
-        </div>
-
-        <ResizeHandle axis="y" onResize={d => updateLayout({ codeH: clamp(codeH - d, 100, 520) })} />
-
-        {/* ── Bottom panel ──────────────────────────────────────────────── */}
-        <div className="code-panel" aria-label="Source code and step info"
-          style={{ height: codeH, gridTemplateColumns: `1fr ${infoW}px` }}>
+          {/* ── Bottom panel ────────────────────────────────────────── */}
+          <div
+            className={`code-panel${logsOpen ? '' : ' code-panel--logs-closed'}`}
+            aria-label="Source code and logs"
+            style={logsOpen ? { height: codeH, gridTemplateColumns: `1fr ${logW}px` } : { height: codeH }}
+          >
 
           {/* Left header */}
           {mode === 'example' ? (
@@ -287,53 +375,85 @@ export function App() {
             <div className="code-panel__code-header" style={{ padding: 0, borderBottom: 'none' }} />
           )}
 
-          {/* Right header */}
-          <div className="code-panel__info-header">
-            <span className="code-panel__label">{noStep ? 'ready' : `step ${stepIndex + 1}/${totalSteps}`}</span>
-            <span className="code-panel__step-label">{step?.label ?? (status === 'error' && execError ? 'Error occurred' : 'paste a program and press ▶ Run')}</span>
-          </div>
+            {/* Right header */}
+            {logsOpen && (
+              <div className="code-panel__info-header">
+                <span className="code-panel__label">{noStep ? 'logs' : `step ${stepIndex + 1}/${totalSteps}`}</span>
+                <div className="code-panel__info-controls">
+                  <span className="code-panel__step-label">{step?.label ?? (status === 'error' && execError ? 'Error occurred' : 'paste a program and press ▶ Run')}</span>
+                  <button
+                    className="code-panel__collapse-btn"
+                    onClick={() => updateLayout({ logsOpen: false })}
+                    aria-label="Close logs panel"
+                    title="Close logs panel"
+                  >
+                    Hide
+                  </button>
+                </div>
+              </div>
+            )}
 
-          {/* Left body */}
-          <div className="code-panel__code-body" style={{ position: 'relative' }}>
-            {mode === 'example' ? (
-              <CodePanel sourceCode={displaySource} activeLineNumber={step?.sourceLineNumber ?? null} />
-            ) : steps.length > 0 ? (
-              /* Custom — viewing: read-only code with active line highlighted */
-              <CodePanel sourceCode={customSource} activeLineNumber={step?.sourceLineNumber ?? null} />
-            ) : (
-              /* Custom — editing: textarea */
-              <CustomEditor
-                value={customSource}
-                onChange={setCustomSource}
-                onRun={() => runThreadSession(customSource)}
-                isRunning={status === 'running'}
-              />
-            )}
-            <ResizeHandle axis="x"
-              onResize={d => updateLayout({ infoW: clamp(infoW - d, 180, 600) })}
-              className="resize-handle--inside-code" />
-          </div>
+                {/* Left body */}
+                <div className="code-panel__code-body" style={{ position: 'relative' }}>
+                  {mode === 'example' ? (
+                    <CodePanel sourceCode={displaySource} activeLineNumber={step?.sourceLineNumber ?? null} />
+                  ) : steps.length > 0 ? (
+                    /* Custom — viewing: read-only code with active line highlighted */
+                    <CodePanel sourceCode={customSource} activeLineNumber={step?.sourceLineNumber ?? null} />
+                  ) : (
+                    /* Custom — editing: textarea */
+                    <CustomEditor
+                      value={customSource}
+                      onChange={setCustomSource}
+                      onRun={() => runThreadSession(customSource)}
+                      isRunning={status === 'running'}
+                    />
+                  )}
+                  {logsOpen && (
+                    <ResizeHandle axis="x"
+                      onResize={d => updateLayout({ logW: clamp(logW - d, 220, 760) })}
+                      className="resize-handle--inside-code" />
+                  )}
+                </div>
 
-          {/* Right body */}
-          <div className={`code-panel__info-body${hasError ? ' code-panel__info-body--error' : ''}`}>
-            {hasError && execError && (
-              <ErrorCard
-                error={execError}
-                onOpenSubset={() => setShowSupport(true)}
-              />
-            )}
-            {step?.delta && (
-              <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-                {step.delta.description}
-              </p>
-            )}
-            {(step?.stdout.length ?? 0) > 0 && (
-              <pre className="code-panel__stdout">{'> ' + step!.stdout.join('\n> ')}</pre>
-            )}
-          </div>
-        </div>
+                {/* Right body */}
+                {logsOpen && (
+                  <div
+                    ref={logBodyRef}
+                    className={`code-panel__info-body${hasError ? ' code-panel__info-body--error' : ''}`}
+                  >
+                    {hasError && execError && (
+                      <ErrorCard
+                        error={execError}
+                        onOpenSubset={() => setShowSupport(true)}
+                      />
+                    )}
+                    {stepLogLines.length > 0 && (
+                      <pre className="code-panel__step-log">{stepLogLines.join('\n')}</pre>
+                    )}
+                    {(step?.stdout.length ?? 0) > 0 && (
+                      <pre className="code-panel__stdout">{'> ' + step!.stdout.join('\n> ')}</pre>
+                    )}
+                  </div>
+                )}
+              </div>
+        </section>
 
-        <ArrowOverlay arrows={step?.arrows ?? []} fadingArrows={fadingArrows} containerRef={mainRef} />
+        <ResizeHandle axis="x" onResize={d => updateLayout({ metaspaceW: clamp(metaspaceW - d, 220, 720) })} />
+
+        <section className="region-panel region-panel--metaspace" aria-label="Metaspace"
+          style={{ width: metaspaceW, minWidth: 220, flexShrink: 0 }}>
+          <div className="region-panel__header">
+            <div className="region-panel__dot" /><span className="region-panel__name">Metaspace</span>
+          </div>
+          <div className="region-panel__body">
+            {noStep
+              ? <p className="empty-state">&nbsp;</p>
+              : <MetaspacePanel klasses={step.metaspace} highlights={highlights} arrows={step.arrows} heap={step.heap} />}
+          </div>
+        </section>
+
+        <ArrowOverlay arrows={visibleArrows} fadingArrows={fadingArrows} containerRef={mainRef} />
         {step && <MethodInvocationArrow currentStep={step} containerRef={mainRef} />}
       </main>
 

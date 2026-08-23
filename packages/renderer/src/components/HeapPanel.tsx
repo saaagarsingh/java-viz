@@ -7,6 +7,8 @@ interface Props {
   highlights:      HighlightTarget[];
   arrows:          Arrow[];
   monitorObjectId?: string; // objectId that was just locked/unlocked this step
+  showHeapRefArrows?: boolean;
+  onRevealReference?: (sourceObjectId: string, fieldName: string, targetObjectId: string) => void;
 }
 
 /** Render lock badge for a heap object's markWord state */
@@ -50,8 +52,11 @@ function activeHeapIds(arrows: Arrow[], highlights: HighlightTarget[]): Set<stri
   return ids;
 }
 
-export function HeapPanel({ objects, highlights, arrows, monitorObjectId }: Props) {
+export function HeapPanel({ objects, highlights, arrows, monitorObjectId, showHeapRefArrows = false, onRevealReference }: Props) {
   const [openOverrides, setOpenOverrides] = useState<Record<string, boolean>>({});
+  const objectLabels = new Map<string, string>(
+    objects.map(o => [o.objectId, `${o.klassName}#${o.objectId.replace(/^obj-/, '')}`])
+  );
 
   if (objects.length === 0) {
     return <p className="empty-state">Empty heap</p>;
@@ -71,6 +76,11 @@ export function HeapPanel({ objects, highlights, arrows, monitorObjectId }: Prop
 
   return (
     <>
+      {!showHeapRefArrows && (
+        <div className="heap-ref-hint" role="note">
+          Click a reference value to reveal just that heap edge.
+        </div>
+      )}
       {objects.map(obj => {
         const highlighted = isHighlighted(highlights, obj.objectId);
         const expanded    = isOpen(obj.objectId);
@@ -104,8 +114,9 @@ export function HeapPanel({ objects, highlights, arrows, monitorObjectId }: Prop
             {expanded && obj.fields.length > 0 && (
               <div className="heap-card__body">
                 {obj.fields.map(field => {
-                  const fmted = formatValue(field.value);
+                  const fmted = formatValue(field.value, { objectLabels, refDisplay: 'compact' });
                   const fieldHighlighted = isHighlighted(highlights, obj.objectId, field.name);
+                  const refTargetId = field.value.kind === 'ref' ? field.value.objectId : null;
                   return (
                     <div
                       key={`${field.declaredIn}.${field.name}`}
@@ -125,7 +136,18 @@ export function HeapPanel({ objects, highlights, arrows, monitorObjectId }: Prop
                           </span>
                         )}
                       </span>
-                      <span className={`field-row__value ${fmted.cls}`}>{fmted.text}</span>
+                      {refTargetId ? (
+                        <button
+                          type="button"
+                          className={`field-row__value field-row__value--ref field-row__value--refbtn`}
+                          onClick={() => onRevealReference?.(obj.objectId, field.name, refTargetId)}
+                          title={`Click to reveal reference edge for ${field.name}`}
+                        >
+                          {fmted.text}
+                        </button>
+                      ) : (
+                        <span className={`field-row__value ${fmted.cls}`}>{fmted.text}</span>
+                      )}
                     </div>
                   );
                 })}

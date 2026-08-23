@@ -1,5 +1,11 @@
 # Phase 2 Design — Multithreading & Concurrency
 
+## Implementation Status (2026-08-23)
+- Engine supports Thread API subset used in examples: `start`, `join`, `join(timeout)`, `sleep`, and Thread constructors with name and Runnable target wiring.
+- Runtime models `WAITING_ON_LOCK` and `WAITING_ON_THREAD`, including timeout wake-up steps for join/sleep waits.
+- Renderer supports thread-session controls (`Step Thread`, `Run All`) and stack thread-name badges.
+- Fresh run playback now begins at step 1 (index 0) instead of jumping to the final step.
+
 ## Vision
 Visualize **race conditions** by allowing the user to manually step individual threads through a shared heap. Initially optimize for 2-thread workflows, but architect for N threads.
 
@@ -9,7 +15,8 @@ Visualize **race conditions** by allowing the user to manually step individual t
 
 ### Thread Lifecycle
 ```
-CREATED → RUNNABLE ←→ WAITING (on lock) → TERMINATED
+CREATED → RUNNABLE ←→ WAITING_ON_LOCK → TERMINATED
+                 ↘ WAITING_ON_THREAD ↗
 ```
 
 ### Thread State (Runtime)
@@ -18,7 +25,7 @@ Each thread owns:
 - **Local variables** (frame-local, thread-private)
 - **Operand stack** (temporary stack per frame, thread-private)
 - **Thread ID** (string: "Thread-0", "Thread-1", "main")
-- **Status** (RUNNABLE, WAITING_ON_LOCK, TERMINATED)
+- **Status** (RUNNABLE, WAITING_ON_LOCK, WAITING_ON_THREAD, TERMINATED)
 - **Monitor wait queue** (if waiting for a lock)
 
 ### Shared Resources

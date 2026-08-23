@@ -1,5 +1,11 @@
 # Phase 2 — Parser Analysis & Code Change Plan
 
+## Status Snapshot (2026-08-23)
+- This document is now primarily historical planning context.
+- Implemented in engine/parser/runtime: synchronized and volatile handling, thread directives/session stepping flow, and Thread API subset wiring (`Thread(String)`, `Thread(Runnable)`, `Thread(Runnable, String)`, `start`, `join`, `join(timeout)`, `sleep`).
+- Implemented in runtime state model: `WAITING_ON_THREAD` plus timeout wake-up steps.
+- Parser sweep and thread regression scripts exist under engine language tests/tools and are passing in the latest validation run.
+
 ## Parser Output Analysis
 
 ### 1. Synchronized Method

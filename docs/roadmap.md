@@ -90,15 +90,17 @@ trace).
 Goal: visualize shared heap, per-thread stacks, and lock state — without
 attempting to simulate real nondeterministic scheduling.
 
-- Multiple stacks (one column per thread) sharing one heap.
-- Manual stepping per thread ("step thread A" / "step thread B")
-  instead of an automatic scheduler — the user deliberately constructs
-  interleavings and race conditions themselves.
-- Visualize the object header's mark word changing state
-  (unlocked -> thin-locked -> fat-locked) when a thread enters a
-  `synchronized` block on a shared object.
-- Do not attempt: real scheduler simulation, memory visibility/happens-
-  before modeling, or multiple GC threads. Out of scope for this tool.
+Current status (2026-08-23):
+- Implemented: thread session workflow (`runThreadSession`, `stepThread`, `drainThreads`) with pending-thread controls in Custom mode.
+- Implemented: Java Thread API subset for teaching flows: `Thread.start()`, `Thread.join()`, `Thread.join(timeout)`, `Thread.sleep()`, and constructors `Thread()`, `Thread(String)`, `Thread(Runnable)`, `Thread(Runnable, String)`.
+- Implemented: `WAITING_ON_THREAD` state and timeout wake-up steps (`thread_join_timeout`, `thread_wakeup`).
+- Implemented: stack thread-name badges sourced from thread object names.
+- Implemented: run behavior now starts from the first step in the trace on fresh execution.
+
+Still out of scope:
+- Real JVM scheduler behavior and true nondeterministic execution.
+- Full happens-before and memory-visibility modeling.
+- Multiple GC threads.
 
 ## Phase 3 (stretch) — garbage collection
 

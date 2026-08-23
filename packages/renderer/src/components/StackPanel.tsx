@@ -44,7 +44,7 @@ function FrameCard({
   frame, isTop, highlights, heapIndex,
 }: {
   frame: StackFrame; isTop: boolean; highlights: HighlightTarget[];
-  heapIndex: Map<string, string>; // objectId → klassName
+  heapIndex: Map<string, string>; // objectId → klass#id label
 }) {
   const highlighted = isHighlighted(highlights, frame.frameId);
   const color = threadColor(frame.threadId);
@@ -67,9 +67,8 @@ function FrameCard({
         <div className="frame-card__body">
           {frame.locals.map(local => {
             const fieldHighlighted = isHighlighted(highlights, frame.frameId, local.name);
-            const val    = local.value;
-            const refVal = val.kind === 'ref' ? val : null;
-            const klassName = refVal ? heapIndex.get(refVal.objectId) : undefined;
+            const val = local.value;
+            const fmted = formatValue(val, { objectLabels: heapIndex, refDisplay: 'compact' });
             return (
               <div
                 key={local.slot}
@@ -77,17 +76,7 @@ function FrameCard({
                 className={`field-row${fieldHighlighted ? ' is-highlighted-field' : ''}`}
               >
                 <span className="field-row__name">{local.name}</span>
-                {refVal ? (
-                  <span className="field-row__value field-row__value--ref">
-                    <span className="ref-arrow">→</span>
-                    <span className="ref-klass">
-                      {(klassName ?? refVal.objectId)}#{refVal.objectId.replace(/^obj-/, '')}
-                    </span>
-                  </span>
-                ) : (() => {
-                  const fmted = formatValue(val);
-                  return <span className={`field-row__value ${fmted.cls}`}>{fmted.text}</span>;
-                })()}
+                <span className={`field-row__value ${fmted.cls}`}>{fmted.text}</span>
               </div>
             );
           })}
@@ -100,8 +89,10 @@ function FrameCard({
 export function StackPanel({ frames, highlights, heap, threadStates, threadDisplayNames }: Props) {
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
 
-  // Build objectId → klassName index once per render for O(1) ref lookup
-  const heapIndex = new Map<string, string>(heap.map(o => [o.objectId, o.klassName]));
+  // Build objectId → klass#id label once per render for O(1) ref lookup
+  const heapIndex = new Map<string, string>(
+    heap.map(o => [o.objectId, `${o.klassName}#${o.objectId.replace(/^obj-/, '')}`])
+  );
 
   if (frames.length === 0) {
     return <p className="empty-state">Empty stack</p>;

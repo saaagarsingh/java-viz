@@ -26,26 +26,26 @@ function arrowStyle(op: OperationType): {
   switch (op) {
     case 'invokevirtual':
     case 'invokeinterface':
-      return { stroke: '#94A3B8', markerEnd: 'url(#arrow-filled)' };
+      return { stroke: '#60A5FA', markerEnd: 'url(#arrow-filled)' };
     case 'invokestatic':
     case 'invokespecial':
-      return { stroke: '#CBD5E1', markerEnd: 'url(#arrow-open)' };
+      return { stroke: '#34D399', markerEnd: 'url(#arrow-open)' };
     case 'klass_pointer_follow':
       // Klass pointer: muted dashed — heap obj → Metaspace class.
       return { stroke: '#94A3B8', strokeDasharray: '5 3', markerEnd: 'url(#arrow-klass)' };
     case 'vtable_lookup':
     case 'itable_lookup':
-      return { stroke: '#94A3B8', strokeDasharray: '4 3', markerEnd: 'url(#arrow-open)' };
+      return { stroke: '#38BDF8', strokeDasharray: '4 3', markerEnd: 'url(#arrow-open)' };
     case 'getfield':
     case 'getstatic':
     case 'return':
-      return { stroke: '#64748B', strokeDasharray: '3 3', markerEnd: 'url(#arrow-hollow)' };
+      return { stroke: '#A1A1AA', strokeDasharray: '3 3', markerEnd: 'url(#arrow-hollow)' };
     case 'putfield':
     case 'putstatic':
     case 'new_object':
-      return { stroke: '#D97706', markerEnd: 'url(#arrow-write)' };
+      return { stroke: '#F59E0B', markerEnd: 'url(#arrow-write)' };
     default:
-      return { stroke: '#94A3B8', markerEnd: 'url(#arrow-filled)' };
+      return { stroke: '#60A5FA', markerEnd: 'url(#arrow-filled)' };
   }
 }
 
@@ -162,8 +162,20 @@ export function ArrowOverlay({ arrows, fadingArrows, containerRef }: Props) {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
       rafRef.current = requestAnimationFrame(compute);
     });
+    const mo = new MutationObserver(() => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      rafRef.current = requestAnimationFrame(compute);
+    });
     const container = containerRef.current;
     if (container) ro.observe(container);
+    if (container) {
+      mo.observe(container, {
+        attributes: true,
+        childList: true,
+        subtree: true,
+        attributeFilter: ['class', 'style'],
+      });
+    }
 
     // Capture scroll events from any scrollable child (panel bodies, etc.)
     const handleScroll = () => {
@@ -175,6 +187,7 @@ export function ArrowOverlay({ arrows, fadingArrows, containerRef }: Props) {
     return () => {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
       ro.disconnect();
+      mo.disconnect();
       if (container) container.removeEventListener('scroll', handleScroll, true);
     };
   }, [compute, containerRef]);
@@ -186,19 +199,19 @@ export function ArrowOverlay({ arrows, fadingArrows, containerRef }: Props) {
       <defs>
         {/* Filled arrowhead — virtual/interface calls */}
         <marker id="arrow-filled" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
-          <path d="M0,0 L8,3 L0,6 Z" fill="#94A3B8" />
+          <path d="M0,0 L8,3 L0,6 Z" fill="#60A5FA" />
         </marker>
         {/* Open arrowhead — static/special */}
         <marker id="arrow-open" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
-          <path d="M0,0 L8,3 L0,6" fill="none" stroke="#CBD5E1" strokeWidth="1.5" />
+          <path d="M0,0 L8,3 L0,6" fill="none" stroke="#34D399" strokeWidth="1.5" />
         </marker>
         {/* Hollow arrowhead — reads/returns */}
         <marker id="arrow-hollow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
-          <path d="M0,0 L8,3 L0,6" fill="none" stroke="#64748B" strokeWidth="1.5" />
+          <path d="M0,0 L8,3 L0,6" fill="none" stroke="#A1A1AA" strokeWidth="1.5" />
         </marker>
         {/* Write arrowhead */}
         <marker id="arrow-write" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
-          <path d="M0,0 L8,3 L0,6 Z" fill="#D97706" />
+          <path d="M0,0 L8,3 L0,6 Z" fill="#F59E0B" />
         </marker>
         {/* Klass pointer arrowhead — matches the muted arrow-open style */}
         <marker id="arrow-klass" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
@@ -238,7 +251,7 @@ export function ArrowOverlay({ arrows, fadingArrows, containerRef }: Props) {
               d={pathD}
               fill="none"
               stroke={style.stroke}
-              strokeWidth={1.5}
+              strokeWidth={2}
               strokeDasharray={style.strokeDasharray}
               markerEnd={style.markerEnd}
             />
