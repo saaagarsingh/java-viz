@@ -8,6 +8,7 @@ interface Props {
   heap:          HeapObject[];
   threadStates?: Map<string, ThreadStatus>;
   threadDisplayNames?: Map<string, string>;
+  onFocusHeapObject?: (objectId: string) => void;
 }
 
 /** Fixed palette — one color per thread, cycling after 4 */
@@ -41,10 +42,11 @@ function StatusBadge({ status }: { status: ThreadStatus }) {
 }
 
 function FrameCard({
-  frame, isTop, highlights, heapIndex,
+  frame, isTop, highlights, heapIndex, onFocusHeapObject,
 }: {
   frame: StackFrame; isTop: boolean; highlights: HighlightTarget[];
   heapIndex: Map<string, string>; // objectId → klass#id label
+  onFocusHeapObject: ((objectId: string) => void) | undefined;
 }) {
   const highlighted = isHighlighted(highlights, frame.frameId);
   const color = threadColor(frame.threadId);
@@ -76,7 +78,18 @@ function FrameCard({
                 className={`field-row${fieldHighlighted ? ' is-highlighted-field' : ''}`}
               >
                 <span className="field-row__name">{local.name}</span>
-                <span className={`field-row__value ${fmted.cls}`}>{fmted.text}</span>
+                {val.kind === 'ref' ? (
+                  <button
+                    type="button"
+                    className={`field-row__value ${fmted.cls} field-row__value--refbtn`}
+                    onClick={() => onFocusHeapObject?.(val.objectId)}
+                    title={`Reveal ${fmted.text} in heap`}
+                  >
+                    {fmted.text}
+                  </button>
+                ) : (
+                  <span className={`field-row__value ${fmted.cls}`}>{fmted.text}</span>
+                )}
               </div>
             );
           })}
@@ -86,7 +99,7 @@ function FrameCard({
   );
 }
 
-export function StackPanel({ frames, highlights, heap, threadStates, threadDisplayNames }: Props) {
+export function StackPanel({ frames, highlights, heap, threadStates, threadDisplayNames, onFocusHeapObject }: Props) {
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
 
   // Build objectId → klass#id label once per render for O(1) ref lookup
@@ -114,7 +127,14 @@ export function StackPanel({ frames, highlights, heap, threadStates, threadDispl
     return (
       <>
         {[...threadFrames].reverse().map((frame, i) => (
-          <FrameCard key={frame.frameId} frame={frame} isTop={i === 0} highlights={highlights} heapIndex={heapIndex} />
+          <FrameCard
+            key={frame.frameId}
+            frame={frame}
+            isTop={i === 0}
+            highlights={highlights}
+            heapIndex={heapIndex}
+            onFocusHeapObject={onFocusHeapObject}
+          />
         ))}
         <div className="thread-label-single" style={{ borderLeftColor: color }}>
           {tid}
@@ -168,7 +188,14 @@ export function StackPanel({ frames, highlights, heap, threadStates, threadDispl
             {isExpanded && (
               <div className="thread-section__frames">
                 {[...threadFrames].reverse().map((frame, i) => (
-                  <FrameCard key={frame.frameId} frame={frame} isTop={i === 0} highlights={highlights} heapIndex={heapIndex} />
+                  <FrameCard
+                    key={frame.frameId}
+                    frame={frame}
+                    isTop={i === 0}
+                    highlights={highlights}
+                    heapIndex={heapIndex}
+                    onFocusHeapObject={onFocusHeapObject}
+                  />
                 ))}
               </div>
             )}

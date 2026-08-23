@@ -84,6 +84,7 @@ function isSelectedHeapReferenceArrow(a: Arrow, sel: HeapRefSelection | null): b
 export function App() {
   const mainRef = useRef<HTMLDivElement | null>(null);
   const logBodyRef = useRef<HTMLDivElement | null>(null);
+  const heapBodyRef = useRef<HTMLDivElement | null>(null);
 
   const {
     mode, exampleIdx, customSource, status, steps, error: execError, stepIndex,
@@ -117,6 +118,8 @@ export function App() {
   const [showSupport, setShowSupport] = useState(false);
   const [showHeapRefArrows, setShowHeapRefArrows] = useState(false);
   const [revealedHeapRef, setRevealedHeapRef] = useState<HeapRefSelection | null>(null);
+  const [focusedHeapObjectId, setFocusedHeapObjectId] = useState<string | null>(null);
+  const [hiddenHeapKlassPtrCount, setHiddenHeapKlassPtrCount] = useState(0);
 
   // Layout (localStorage-persisted, independent of trace state)
   const [layout, setLayout] = useState<LayoutState>(loadLayout);
@@ -165,7 +168,21 @@ export function App() {
 
   useEffect(() => {
     setRevealedHeapRef(null);
+    setFocusedHeapObjectId(null);
   }, [stepIndex]);
+
+  const focusHeapObject = useCallback((objectId: string) => {
+    const el = document.getElementById(`heap-${objectId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+      setFocusedHeapObjectId(objectId);
+      window.setTimeout(() => setFocusedHeapObjectId((cur) => (cur === objectId ? null : cur)), 1200);
+    }
+  }, []);
+
+  const handleArrowVisibilityStats = useCallback((stats: { hiddenKlassPtrsFromHeap: number; hiddenTotal: number }) => {
+    setHiddenHeapKlassPtrCount((prev) => (prev === stats.hiddenKlassPtrsFromHeap ? prev : stats.hiddenKlassPtrsFromHeap));
+  }, []);
 
   // Empty-state content shown in memory panels when there's no step yet
   const noStep = !step;
@@ -287,6 +304,7 @@ export function App() {
                       frames={step.stack}
                       highlights={highlights}
                       heap={step.heap}
+                      onFocusHeapObject={focusHeapObject}
                       {...(step.threadStates ? { threadStates: step.threadStates } : {})}
                       {...(step.threadDisplayNames ? { threadDisplayNames: step.threadDisplayNames } : {})}
                     />}
@@ -298,6 +316,15 @@ export function App() {
             <section className="region-panel region-panel--heap" aria-label="Heap" style={{ flex: 1, minWidth: COL_MIN }}>
               <div className="region-panel__header">
                 <div className="region-panel__dot" /><span className="region-panel__name">Heap</span>
+                {!noStep && hiddenHeapKlassPtrCount > 0 && (
+                  <span
+                    className="heap-hidden-indicator"
+                    title={`${hiddenHeapKlassPtrCount} klass pointer arrow(s) hidden because source/target cards are off-screen`}
+                    aria-label={`${hiddenHeapKlassPtrCount} hidden heap-to-metaspace arrows`}
+                  >
+                    {hiddenHeapKlassPtrCount} hidden refs
+                  </span>
+                )}
                 {!noStep && (
                   <span
                     className={`monitor-pill${hasActiveLock ? ' monitor-pill--active' : ''}`}
@@ -308,13 +335,14 @@ export function App() {
                   </span>
                 )}
               </div>
-              <div className="region-panel__body">
+              <div className="region-panel__body" ref={heapBodyRef}>
                 {noStep
                   ? <p className="empty-state">&nbsp;</p>
                   : <HeapPanel
                       objects={step.heap}
                       highlights={highlights}
                       arrows={step.arrows}
+                      focusedObjectId={focusedHeapObjectId}
                       showHeapRefArrows={showHeapRefArrows}
                       onRevealReference={(sourceObjectId, fieldName, targetObjectId) => {
                         setRevealedHeapRef(prev => {
@@ -455,7 +483,12 @@ export function App() {
           </div>
         </section>
 
-        <ArrowOverlay arrows={visibleArrows} fadingArrows={fadingArrows} containerRef={mainRef} />
+        <ArrowOverlay
+          arrows={visibleArrows}
+          fadingArrows={fadingArrows}
+          containerRef={mainRef}
+          onVisibilityStatsChange={handleArrowVisibilityStats}
+        />
         {step && <MethodInvocationArrow currentStep={step} containerRef={mainRef} />}
       </main>
 

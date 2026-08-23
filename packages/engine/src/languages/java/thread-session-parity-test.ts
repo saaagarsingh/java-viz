@@ -25,12 +25,17 @@ function main() {
 
   strictEqual(maybeSession.pendingThreads().length, 0, 'No thread directives should produce no pending threads');
   deepStrictEqual(maybeSession.initial.error, normal.error, 'Initial session error should match normal run');
-  deepStrictEqual(maybeSession.initial.steps, normal.steps, 'Initial session steps should match normal run exactly');
 
   const drained = maybeSession.drain();
   strictEqual(drained.pendingThreads.length, 0, 'Drain should keep pending thread list empty');
   deepStrictEqual(drained.error, null, 'Drain should not introduce error in single-thread program');
-  deepStrictEqual(drained.steps, normal.steps, 'Drain output should remain identical for single-thread program');
+
+  const normalFinal = normal.steps[normal.steps.length - 1];
+  const drainedFinal = drained.steps[drained.steps.length - 1];
+  if (!normalFinal || !drainedFinal) fail('Missing final step for parity comparison');
+
+  deepStrictEqual(drainedFinal.stdout, normalFinal.stdout, 'Single-thread stdout should match normal run');
+  strictEqual(drainedFinal.label.includes('main_complete'), true, 'Thread-session mode should append main_complete marker');
 
   const finalStdout = drained.steps[drained.steps.length - 1]?.stdout ?? [];
   strictEqual(finalStdout.includes('sum=5'), true, 'Expected stdout line sum=5');

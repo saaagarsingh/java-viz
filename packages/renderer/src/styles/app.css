@@ -241,6 +241,22 @@
   background: rgba(99, 102, 241, 0.16);
 }
 
+.heap-hidden-indicator {
+  margin-left: auto;
+  margin-right: 6px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  color: var(--text-muted);
+  background: rgba(148, 163, 184, 0.08);
+}
+
 .region-panel__body {
   flex: 1;
   overflow-y: auto;
@@ -702,6 +718,11 @@
   overflow: hidden;
   flex-shrink: 0;
   background: var(--region-heap-bg);
+}
+
+.heap-card--focused {
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.7);
+  animation: highlight-pulse 700ms ease-out forwards;
 }
 .heap-card__header {
   padding: var(--space-1) var(--space-3);

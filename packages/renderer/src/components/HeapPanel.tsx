@@ -8,6 +8,7 @@ interface Props {
   arrows:          Arrow[];
   monitorObjectId?: string; // objectId that was just locked/unlocked this step
   showHeapRefArrows?: boolean;
+  focusedObjectId?: string | null;
   onRevealReference?: (sourceObjectId: string, fieldName: string, targetObjectId: string) => void;
 }
 
@@ -52,7 +53,7 @@ function activeHeapIds(arrows: Arrow[], highlights: HighlightTarget[]): Set<stri
   return ids;
 }
 
-export function HeapPanel({ objects, highlights, arrows, monitorObjectId, showHeapRefArrows = false, onRevealReference }: Props) {
+export function HeapPanel({ objects, highlights, arrows, monitorObjectId, showHeapRefArrows = false, focusedObjectId = null, onRevealReference }: Props) {
   const [openOverrides, setOpenOverrides] = useState<Record<string, boolean>>({});
   const objectLabels = new Map<string, string>(
     objects.map(o => [o.objectId, `${o.klassName}#${o.objectId.replace(/^obj-/, '')}`])
@@ -65,6 +66,7 @@ export function HeapPanel({ objects, highlights, arrows, monitorObjectId, showHe
   const active = activeHeapIds(arrows, highlights);
 
   function isOpen(objectId: string): boolean {
+    if (focusedObjectId === objectId) return true;
     return objectId in openOverrides
       ? (openOverrides[objectId] ?? false)
       : active.has(objectId);
@@ -88,7 +90,7 @@ export function HeapPanel({ objects, highlights, arrows, monitorObjectId, showHe
           <div
             key={obj.objectId}
             id={`heap-${obj.objectId}`}
-            className={`heap-card${highlighted ? ' is-highlighted' : ''}`}
+            className={`heap-card${highlighted ? ' is-highlighted' : ''}${focusedObjectId === obj.objectId ? ' heap-card--focused' : ''}`}
           >
             <button
               className="heap-card__header heap-card__header--btn"

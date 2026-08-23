@@ -161,6 +161,7 @@ export class JavaInterpreter {
   private threadDisplayNames = new Map<string, string>();
   private nextAutoThreadId = 1;
   private schedulerTick = 0;
+  private schedulerCursor = 0;
 
   constructor(opts?: { threadDirectives?: ThreadDirective[] }) {
     const directives = opts?.threadDirectives ?? [];
@@ -1477,7 +1478,11 @@ export class JavaInterpreter {
         continue;
       }
 
-      for (const threadId of workers) {
+      const startIdx = this.schedulerCursor % workers.length;
+      const orderedWorkers = workers.slice(startIdx).concat(workers.slice(0, startIdx));
+      this.schedulerCursor = (this.schedulerCursor + 1) % workers.length;
+
+      for (const threadId of orderedWorkers) {
         const thread = this.threads.get(threadId);
         if (!thread || thread.tasks.length === 0) {
           if (thread && thread.status !== 'WAITING_ON_LOCK' && thread.status !== 'WAITING_ON_THREAD') {

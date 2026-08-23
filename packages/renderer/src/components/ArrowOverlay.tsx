@@ -5,6 +5,7 @@ interface Props {
   arrows:       Arrow[];
   fadingArrows: string[];
   containerRef: React.RefObject<HTMLElement | null>;
+  onVisibilityStatsChange?: (stats: { hiddenKlassPtrsFromHeap: number; hiddenTotal: number }) => void;
 }
 
 interface ComputedArrow {
@@ -76,6 +77,37 @@ function centre(el: Element, container: Element): { x: number; y: number } | nul
 }
 
 /**
+ * Returns true only when the endpoint is visible inside all scrollable ancestors.
+ * This avoids drawing arrows to elements currently clipped out of view.
+ */
+function isVisibleInScrollableAncestors(el: Element, stopAt: Element): boolean {
+  let cur: Element | null = el;
+  const targetRect = el.getBoundingClientRect();
+
+  while (cur && cur !== stopAt) {
+    const parent: HTMLElement | null = cur.parentElement;
+    if (!parent) break;
+
+    const style = window.getComputedStyle(parent);
+    const overflowY = style.overflowY;
+    const overflowX = style.overflowX;
+    const clipsY = overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'hidden' || overflowY === 'clip';
+    const clipsX = overflowX === 'auto' || overflowX === 'scroll' || overflowX === 'hidden' || overflowX === 'clip';
+
+    if (clipsY || clipsX) {
+      const pr = parent.getBoundingClientRect();
+      const intersectsY = targetRect.bottom > pr.top && targetRect.top < pr.bottom;
+      const intersectsX = targetRect.right > pr.left && targetRect.left < pr.right;
+      if (!intersectsY || !intersectsX) return false;
+    }
+
+    cur = parent;
+  }
+
+  return true;
+}
+
+/**
  * Clamp an arrow endpoint to the border of its target element (4px inset).
  * We project the line endpoint onto the element's border box.
  */
@@ -118,7 +150,7 @@ function clampToBorder(
   return best ? { x: best.x, y: best.y } : { x: bx, y: by };
 }
 
-export function ArrowOverlay({ arrows, fadingArrows, containerRef }: Props) {
+export function ArrowOverlay({ arrows, fadingArrows, containerRef, onVisibilityStatsChange }: Props) {
   const [computed, setComputed] = useState<ComputedArrow[]>([]);
   const rafRef = useRef<number | null>(null);
 
@@ -127,12 +159,29 @@ export function ArrowOverlay({ arrows, fadingArrows, containerRef }: Props) {
     if (!container) return;
 
     const results: ComputedArrow[] = [];
+    let hiddenTotal = 0;
+    let hiddenKlassPtrsFromHeap = 0;
     for (const arrow of arrows) {
       const fromId = elementDomId(arrow, 'from');
       const toId   = elementDomId(arrow, 'to');
       const fromEl = document.getElementById(fromId);
       const toEl   = document.getElementById(toId);
-      if (!fromEl || !toEl) continue;
+      if (!fromEl || !toEl) {
+        hiddenTotal++;
+        if (arrow.operation === 'klass_pointer_follow' && arrow.from.region === 'heap') {
+          hiddenKlassPtrsFromHeap++;
+        }
+        continue;
+      }
+
+      // Skip arrows if either endpoint is currently out of view in a scrolled panel.
+      if (!isVisibleInScrollableAncestors(fromEl, container) || !isVisibleInScrollableAncestors(toEl, container)) {
+        hiddenTotal++;
+        if (arrow.operation === 'klass_pointer_follow' && arrow.from.region === 'heap') {
+          hiddenKlassPtrsFromHeap++;
+        }
+        continue;
+      }
 
       const fromCentre = centre(fromEl, container);
       const toCentre   = centre(toEl,   container);
@@ -152,7 +201,8 @@ export function ArrowOverlay({ arrows, fadingArrows, containerRef }: Props) {
       });
     }
     setComputed(results);
-  }, [arrows, fadingArrows, containerRef]);
+    onVisibilityStatsChange?.({ hiddenKlassPtrsFromHeap, hiddenTotal });
+  }, [arrows, fadingArrows, containerRef, onVisibilityStatsChange]);
 
   // Recompute on mount, step change, resize, and any scroll inside the container
   useEffect(() => {
