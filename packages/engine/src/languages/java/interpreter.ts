@@ -1977,7 +1977,7 @@ export class JavaInterpreter {
       // Look up isVolatile from the declaring class's field declarations
       const decl      = this.loaded.decls.get(declaredIn);
       const fieldDecl = decl?.fields.find(f => f.name === name && !f.isStatic);
-      const slot: import('../../types.js').FieldSlot = { name, declaredIn, value };
+      const slot: import('../../types.js').FieldSlot = { name, declaredIn, value: this.cloneValue(value) };
       if (fieldDecl?.isVolatile) slot.isVolatile = true;
       result.push(slot);
     }
@@ -1985,7 +1985,30 @@ export class JavaInterpreter {
   }
 
   private snapshotMetaspace(): KlassInfo[] {
-    return Array.from(this.klassState.values()).map(k => ({ ...k, staticFields: [...k.staticFields] }));
+    return Array.from(this.klassState.values()).map(k => ({
+      ...k,
+      staticFields: k.staticFields.map(f => ({
+        ...f,
+        value: this.cloneValue(f.value),
+      })),
+    }));
+  }
+
+  private cloneValue(v: Value): Value {
+    switch (v.kind) {
+      case 'int':
+      case 'long':
+      case 'double':
+      case 'float':
+      case 'boolean':
+      case 'char':
+        return { ...v };
+      case 'null':
+      case 'uninitialized':
+        return { kind: v.kind };
+      case 'ref':
+        return { kind: 'ref', objectId: v.objectId };
+    }
   }
 
   // ── Lookup helpers ─────────────────────────────────────────────────────────
