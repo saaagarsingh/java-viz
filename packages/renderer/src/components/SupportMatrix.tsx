@@ -63,7 +63,7 @@ const SUPPORTED: { label: string; items: string[] }[] = [
     ],
   },
   {
-    label: 'Concurrency (Phase 2/2.1)',
+    label: 'Concurrency (Phase 2 — Complete)',
     items: [
       'synchronized instance/static methods',
       'volatile field declaration + visualization',
@@ -84,71 +84,25 @@ const SUPPORTED: { label: string; items: string[] }[] = [
   },
 ];
 
-const UNSUPPORTED: { label: string; phase: string; items: string[] }[] = [
+const UNSUPPORTED: { label: string; items: string[] }[] = [
   {
-    label: 'Control flow',
-    phase: 'Phase 5',
+    label: 'Future Enhancements',
     items: [
-      'Enhanced for-each (for x : list)',
-      'switch statement',
-      'Labeled break / continue',
-    ],
-  },
-  {
-    label: 'Exceptions',
-    phase: 'Phase 4',
-    items: [
-      'throw statement',
-      'try / catch / finally',
-    ],
-  },
-  {
-    label: 'Type system',
-    phase: '—',
-    items: [
+      'Exception handling: try / catch / finally, throw statements',
+      'Array creation and access: new int[n], arr[i]',
+      'Enhanced for-each loops: for (x : list)',
       'Type casts: (Type) expr',
       'Generics: List<T>',
-    ],
-  },
-  {
-    label: 'Arrays',
-    phase: 'Phase 5',
-    items: [
-      'Array creation: new int[n]',
-      'Array access: arr[i]',
-      'Array parameters / return',
-      'Enhanced for-each (for x : arr)',
-    ],
-  },
-  {
-    label: 'OOP advanced',
-    phase: 'Phase 6',
-    items: [
-      'Lambda expressions',
-      'Anonymous classes',
-      'Nested / inner classes',
+      'Lambda expressions and invokedynamic',
+      'Anonymous classes, nested / inner classes',
       'super.method() calls',
-    ],
-  },
-  {
-    label: 'Other',
-    phase: '—',
-    items: [
-      'import / package declarations',
-      'Multiple vars in one statement',
-      'Varargs (...)',
-      'Bitwise operators',
+      'switch statements, labeled break/continue',
+      'import / package declarations, multiple vars per statement',
+      'Varargs, bitwise operators',
       'Records, enums, sealed classes',
-    ],
-  },
-  {
-    label: 'Advanced concurrency',
-    phase: 'Future scope',
-    items: [
       'Real nondeterministic scheduler simulation',
       'Full Java Memory Model / happens-before visibility semantics',
-      'java.util.concurrent locks and atomics',
-      'Wait/notify spurious wakeups and interruption modeling',
+      'java.util.concurrent locks, atomics, and advanced primitives',
     ],
   },
 ];
@@ -231,7 +185,6 @@ export function SupportMatrix({ open, onClose }: Props) {
               <div key={group.label} className="support-group">
                 <div className="support-group__label">
                   {group.label}
-                  <span className="support-group__phase">{group.phase}</span>
                 </div>
                 <ul className="support-group__list">
                   {group.items.map(item => (

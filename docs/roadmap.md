@@ -85,30 +85,62 @@ as real source and produce identical traces to the hand-authored ones
 (this is your regression test that the interpreter matches the hand
 trace).
 
-## Phase 2 — multithreading / concurrency
+## Phase 2 — multithreading / concurrency (COMPLETE — 2026-08-23)
 
 Goal: visualize shared heap, per-thread stacks, and lock state — without
 attempting to simulate real nondeterministic scheduling.
 
-Current status (2026-08-23):
-- Implemented: thread session workflow (`runThreadSession`, `stepThread`, `drainThreads`) with pending-thread controls in Custom mode.
-- Implemented: Java Thread API subset for teaching flows: `Thread.start()`, `Thread.join()`, `Thread.join(timeout)`, `Thread.sleep()`, and constructors `Thread()`, `Thread(String)`, `Thread(Runnable)`, `Thread(Runnable, String)`.
-- Implemented: `WAITING_ON_THREAD` state and timeout wake-up steps (`thread_join_timeout`, `thread_wakeup`).
-- Implemented (Phase 2.1): monitor condition operations `Object.wait()`, `Object.wait(timeout)`, `Object.notify()`, `Object.notifyAll()` in deterministic stepping mode.
-- Implemented (Phase 2.1): monitor state escalation visualization (`thin-locked` / `fat-locked`) and condition-wait queue tracking.
-- Implemented: stack thread-name badges sourced from thread object names.
-- Implemented: run behavior now starts from the first step in the trace on fresh execution.
+**Status: COMPLETE**
 
-Still out of scope:
+Completed features:
+- Thread session workflow (`runThreadSession`, `stepThread`, `drainThreads`) with pending-thread controls in Custom mode.
+- Java Thread API subset: `Thread()`, `Thread(String)`, `Thread(Runnable)`, `Thread(Runnable, String)`, `Thread.start()`, `Thread.join()`, `Thread.join(timeout)`, `Thread.sleep()`.
+- Thread states and visualization: RUNNABLE, WAITING_ON_LOCK, WAITING_ON_THREAD, TERMINATED with deterministic scheduling and fair round-robin task rotation.
+- Monitor condition operations: `Object.wait()`, `Object.wait(timeout)`, `Object.notify()`, `Object.notifyAll()` with condition-wait queue tracking.
+- Synchronized methods and blocks with automatic monitor enter/exit on dispatch.
+- Monitor state escalation visualization (thin-locked / fat-locked).
+- Volatile field declaration + read/write visualization.
+- Stack thread-name badges sourced from thread object names.
+- UI improvements for large programs: collapsible Stack/Heap/Metaspace regions with summaries to manage viewport saturation.
+
+Deliberately out of scope (deferred to future):
 - Real JVM scheduler behavior and true nondeterministic execution.
 - Full happens-before and memory-visibility modeling.
 - Multiple GC threads.
+- Spurious wakeups / interruption semantics.
+- Detailed `notify` fairness policies.
+- `java.util.concurrent` primitives.
+
+**Exit criteria: SATISFIED**
+- All threading examples browsable end-to-end.
+- Deterministic stepping API and manual interleavings.
+- Lock ownership and wait-queue visualization.
+- No regression in single-thread traces.
 
 ## Phase 3 (stretch) — garbage collection
 
 - Mark-and-sweep animation across the heap.
 - Young-to-old generation promotion visualization.
 - Only start this after Phase 2 is stable — lowest priority phase.
+
+## Phase 4 – Exceptions (future)
+
+- try / catch / finally blocks
+- throw statements
+- Exception propagation and stack unwinding visualization
+
+## Phase 5 – Collections & Control Flow (future)
+
+- Arrays and array access
+- Enhanced for-each loops
+- switch statements
+- Labeled break/continue
+
+## Phase 6 – Advanced OOP (future)
+
+- Lambda expressions and invokedynamic
+- Anonymous classes, nested / inner classes
+- super.method() calls
 
 ## Scope discipline
 
@@ -117,10 +149,7 @@ prep time (React internals, LLD, HLD, DSA, frontend system design)
 ahead of the Nov 9 deadline, it loses. Weekend-only, and Phase 0 alone
 is a complete enough deliverable to pause on if time gets tight.
 
-## Future scope (after current roadmap)
-
-Concurrency topics intentionally deferred:
-- Spurious wakeups / interruption semantics around `wait()`.
-- Detailed `notify` fairness policies and scheduler-level nondeterminism.
-- `java.util.concurrent` primitives (`ReentrantLock`, `ReadWriteLock`, semaphores, atomics).
-- Full Java Memory Model visibility and ordering guarantees.
+Phase 0 (hand-traced examples) is complete and deployable.
+Phase 1 (real interpreter) is complete and functional.
+Phase 2 (multithreading & locking) is complete and tested.
+Phases 3+ are explicitly deferred — not in current scope.
