@@ -690,6 +690,21 @@ export class JavaInterpreter {
     const receiverVal = this.evalExpr(expr.receiver);
 
     if (receiverVal.kind !== 'ref') {
+      // In static methods, unqualified calls parse as this.method(...), but there
+      // is no instance receiver. Resolve such calls as static on the current class.
+      if (expr.receiver.kind === 'ThisExpr') {
+        const frame = this.topFrame();
+        if (frame) {
+          return this.evalStaticMethodCall({
+            kind: 'StaticMethodCallExpr',
+            className: frame.className,
+            method: expr.method,
+            args: expr.args,
+            loc: expr.loc,
+          });
+        }
+      }
+
       // Could be a call on a primitive (e.g., toString on int) — unsupported
       throw new InterpreterHalt({ kind: 'runtime_error', message: `Cannot call method "${expr.method}" on non-object value` });
     }
