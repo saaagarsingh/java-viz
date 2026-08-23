@@ -118,6 +118,7 @@ interface ThreadState {
   waitUntilTick: number | null;
   waitingLine:  number | null;
   tasks:        ThreadTask[];
+  isExecutingTask: boolean;
 }
 
 interface ObjectLock {
@@ -190,8 +191,29 @@ export class JavaInterpreter {
       this.executeMethod(mainClass.name, mainMethod, []);
 
       this.popFrame();
-      if (!opts?.deferWorkerThreads) {
+      const mainThread = this.getOrCreateThread('main');
+      if (opts?.deferWorkerThreads) {
+        const hasPendingWorkers = this.pendingThreadIds().length > 0;
+        mainThread.status = hasPendingWorkers ? 'WAITING_ON_THREAD' : 'TERMINATED';
+        mainThread.waitingOn = hasPendingWorkers ? 'thread:workers' : null;
+        mainThread.waitUntilTick = null;
+        mainThread.waitingLine = null;
+
+        this.emitStep(mainMethod.loc.line, {
+          operation: 'return',
+          description: hasPendingWorkers
+            ? 'main_complete — awaiting worker threads'
+            : 'main_complete',
+          highlightedElements: [],
+          newArrows: [],
+          fadingArrows: [],
+        });
+      } else {
         this.runSpawnedThreads();
+        mainThread.status = 'TERMINATED';
+        mainThread.waitingOn = null;
+        mainThread.waitUntilTick = null;
+        mainThread.waitingLine = null;
       }
       return { steps: this.steps, error: null };
 
@@ -523,14 +545,14 @@ export class JavaInterpreter {
         if (obj.kind !== 'ref') {
           throw new InterpreterHalt({ kind: 'null_pointer', className: '(primitive)', field: 'synchronized', line: stmt.loc.line });
         }
-        
+
         const objectId = obj.objectId;
         this.acquireMonitor(objectId, this.currentThreadId, stmt.loc.line);
         const currentThread = this.getOrCreateThread(this.currentThreadId);
         if (currentThread.status === 'WAITING_ON_LOCK') {
           throw new ThreadBlocked(objectId);
         }
-        
+
         try {
           this.executeStatements(stmt.body, stmt.loc.line);
         } finally {
@@ -825,10 +847,31 @@ export class JavaInterpreter {
     let returnValue: Value = { kind: 'uninitialized' };
     try {
       if (!implMethod.body) throw new InterpreterHalt({ kind: 'runtime_error', message: `Abstract method ${implClass}.${methodName} has no body` });
-      this.executeStatements(implMethod.body, implMethod.loc.line);
+      if (implMethod.isSynchronized) {
+        const thisRef = frame.locals.get('this');
+        if (!thisRef || thisRef.kind !== 'ref') {
+          throw new InterpreterHalt({ kind: 'null_pointer', className: implClass, field: 'this', line: implMethod.loc.line });
+        }
+        const lockObjectId = thisRef.objectId;
+        this.acquireMonitor(lockObjectId, this.currentThreadId, implMethod.loc.line);
+        const currentThread = this.getOrCreateThread(this.currentThreadId);
+        if (currentThread.status === 'WAITING_ON_LOCK') {
+          throw new ThreadBlocked(lockObjectId);
+        }
+        try {
+          this.executeStatements(implMethod.body, implMethod.loc.line);
+        } finally {
+          this.releaseMonitor(lockObjectId, this.currentThreadId, implMethod.loc.line);
+        }
+      } else {
+        this.executeStatements(implMethod.body, implMethod.loc.line);
+      }
     } catch (e) {
       if (e instanceof ReturnSignal) {
         returnValue = e.value;
+      } else if (e instanceof ThreadBlocked) {
+        this.popFrame();
+        throw e;
       } else throw e;
     }
 
@@ -884,10 +927,37 @@ export class JavaInterpreter {
 
     let returnValue: Value = { kind: 'uninitialized' };
     try {
-      if (implMethod.body) this.executeStatements(implMethod.body, implMethod.loc.line);
+      if (!implMethod.body) {
+        throw new InterpreterHalt({ kind: 'runtime_error', message: `Abstract method ${implClass}.${methodName} has no body` });
+      }
+      if (implMethod.isSynchronized) {
+        const thisRef = frame.locals.get('this');
+        if (!thisRef || thisRef.kind !== 'ref') {
+          throw new InterpreterHalt({ kind: 'null_pointer', className: implClass, field: 'this', line: implMethod.loc.line });
+        }
+        const lockObjectId = thisRef.objectId;
+        this.acquireMonitor(lockObjectId, this.currentThreadId, implMethod.loc.line);
+        const currentThread = this.getOrCreateThread(this.currentThreadId);
+        if (currentThread.status === 'WAITING_ON_LOCK') {
+          throw new ThreadBlocked(lockObjectId);
+        }
+        try {
+          this.executeStatements(implMethod.body, implMethod.loc.line);
+        } finally {
+          this.releaseMonitor(lockObjectId, this.currentThreadId, implMethod.loc.line);
+        }
+      } else {
+        this.executeStatements(implMethod.body, implMethod.loc.line);
+      }
     } catch (e) {
-      if (e instanceof ReturnSignal) returnValue = e.value;
-      else throw e;
+      if (e instanceof ReturnSignal) {
+        returnValue = e.value;
+      } else if (e instanceof ThreadBlocked) {
+        this.popFrame();
+        throw e;
+      } else {
+        throw e;
+      }
     }
 
     this.popFrame();
@@ -911,6 +981,22 @@ export class JavaInterpreter {
 
       if (this.currentThreadId === 'main') {
         this.runSpawnedThreads({ maxTicks: ticks });
+      } else {
+        const current = this.getOrCreateThread(this.currentThreadId);
+        current.status = 'WAITING_ON_THREAD';
+        current.waitingOn = `sleep:${this.currentThreadId}`;
+        current.waitUntilTick = this.schedulerTick + ticks;
+        current.waitingLine = expr.loc.line;
+
+        // Let other workers advance while this thread is parked. Exclude the
+        // current thread to avoid re-dispatching it from the start of run().
+        this.runSpawnedThreads({ maxTicks: ticks, excludeThreadId: this.currentThreadId });
+
+        // The sleeping thread resumes execution at this exact point.
+        current.status = 'RUNNABLE';
+        current.waitingOn = null;
+        current.waitUntilTick = null;
+        current.waitingLine = null;
       }
 
       return { kind: 'uninitialized' };
@@ -1325,6 +1411,7 @@ export class JavaInterpreter {
         waitUntilTick: null,
         waitingLine: null,
         tasks: [],
+        isExecutingTask: false,
       });
       this.threadOrder.push(threadId);
       if (!this.threadDisplayNames.has(threadId)) {
@@ -1371,9 +1458,10 @@ export class JavaInterpreter {
     }
   }
 
-  private runSpawnedThreads(opts?: { maxTicks?: number }) {
+  private runSpawnedThreads(opts?: { maxTicks?: number; excludeThreadId?: string }) {
     const previousThreadId = this.currentThreadId;
     const workerIds = () => this.threadOrder.filter(tid => tid !== 'main');
+    const excludedThreadId = opts?.excludeThreadId ?? null;
     let ticksLeft = opts?.maxTicks ?? Number.MAX_SAFE_INTEGER;
 
     while (ticksLeft > 0) {
@@ -1381,9 +1469,13 @@ export class JavaInterpreter {
       this.schedulerTick++;
       let progressed = false;
       if (this.processTimedWakeups()) progressed = true;
-      const workers = workerIds();
+      const workers = workerIds().filter((tid) => tid !== excludedThreadId);
 
-      if (workers.length === 0) break;
+      if (workers.length === 0) {
+        // Keep ticking for timeout-based wakeups when no runnable workers exist.
+        if (!this.hasTimedWaiters()) break;
+        continue;
+      }
 
       for (const threadId of workers) {
         const thread = this.threads.get(threadId);
@@ -1413,9 +1505,11 @@ export class JavaInterpreter {
       return false;
     }
     if (thread.status !== 'RUNNABLE') return false;
+    if (thread.isExecutingTask) return false;
 
     const task = thread.tasks[0]!;
     const previousThreadId = this.currentThreadId;
+    thread.isExecutingTask = true;
     this.currentThreadId = threadId;
     const runFrame = this.pushFrame('Thread', 'run', [], [], task.originLine);
     runFrame.locals = new Map(task.capturedLocals ?? []);
@@ -1482,6 +1576,7 @@ export class JavaInterpreter {
       }
       throw e;
     } finally {
+      thread.isExecutingTask = false;
       this.currentThreadId = previousThreadId;
     }
   }
@@ -2191,54 +2286,29 @@ export class JavaInterpreter {
         },
       });
     } else if (lock.owner === null) {
-      // Released lock with queued waiters: only queue head may acquire next (fair handoff).
-      const queueHead = lock.waitQueue[0] ?? null;
-      if (queueHead === threadId || queueHead === null) {
-        if (queueHead === threadId) lock.waitQueue.shift();
-        lock.owner = threadId;
-        lock.depth = 1;
-        lock.acquiredAt = this.steps.length;
-        thread.status = 'RUNNABLE';
-        thread.waitingOn = null;
-        thread.waitUntilTick = null;
-        thread.waitingLine = null;
+      // Released lock: allow any waiter to acquire to avoid handoff stalls.
+      lock.waitQueue = lock.waitQueue.filter((tid) => tid !== threadId);
+      lock.owner = threadId;
+      lock.depth = 1;
+      lock.acquiredAt = this.steps.length;
+      thread.status = 'RUNNABLE';
+      thread.waitingOn = null;
+      thread.waitUntilTick = null;
+      thread.waitingLine = null;
 
-        this.emitStep(lineHint, {
-          operation: 'monitor_enter',
-          description: `monitor_enter — ${threadId} acquired lock on ${objectId}`,
-          highlightedElements: [{ region: 'heap', elementId: objectId }],
-          newArrows: [],
-          fadingArrows: [],
-          monitorOperation: {
-            kind: 'monitor_enter',
-            objectId,
-            threadId,
-            markWord: this.lockMarkWord(lock),
-          },
-        });
-      } else {
-        if (!lock.waitQueue.includes(threadId)) {
-          lock.waitQueue.push(threadId);
-        }
-        thread.status = 'WAITING_ON_LOCK';
-        thread.waitingOn = objectId;
-        thread.waitUntilTick = null;
-        thread.waitingLine = lineHint;
-
-        this.emitStep(lineHint, {
-          operation: 'monitor_enter',
-          description: `monitor_enter — ${threadId} waiting for lock handoff on ${objectId}`,
-          highlightedElements: [{ region: 'heap', elementId: objectId }],
-          newArrows: [],
-          fadingArrows: [],
-          monitorOperation: {
-            kind: 'monitor_enter',
-            objectId,
-            threadId,
-            markWord: 'unlocked',
-          },
-        });
-      }
+      this.emitStep(lineHint, {
+        operation: 'monitor_enter',
+        description: `monitor_enter — ${threadId} acquired lock on ${objectId}`,
+        highlightedElements: [{ region: 'heap', elementId: objectId }],
+        newArrows: [],
+        fadingArrows: [],
+        monitorOperation: {
+          kind: 'monitor_enter',
+          objectId,
+          threadId,
+          markWord: this.lockMarkWord(lock),
+        },
+      });
     } else {
       // Lock held by another thread - add to wait queue
       if (!lock.waitQueue.includes(threadId)) {

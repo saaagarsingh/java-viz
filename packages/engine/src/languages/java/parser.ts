@@ -84,6 +84,23 @@ function tokenImage(node: any, key: string): string | undefined {
   return node?.children?.[key]?.[0]?.image;
 }
 
+function collectTokenImages(node: any, acc: string[] = []): string[] {
+  if (!node) return acc;
+  if (typeof node.image === 'string') {
+    acc.push(node.image);
+    return acc;
+  }
+  const kids = node.children ?? {};
+  for (const key of Object.keys(kids)) {
+    const arr = kids[key];
+    if (!Array.isArray(arr)) continue;
+    for (const childNode of arr) {
+      collectTokenImages(childNode, acc);
+    }
+  }
+  return acc;
+}
+
 // ── Public entry point ────────────────────────────────────────────────────────
 
 export function parseJava(source: string): Program {
@@ -229,6 +246,11 @@ function transformClassBody(body: any, className: string) {
   const methods:           MethodDecl[]     = [];
 
   for (const decl of children(body, 'classBodyDeclaration')) {
+    const declModifiers: string[] = children(decl, 'classBodyDeclarationModifier')
+      .flatMap((m: any) => collectTokenImages(m))
+      .map((t: any) => String(t).toLowerCase());
+    const declTokensAll: string[] = collectTokenImages(decl).map((t: any) => String(t).toLowerCase());
+
     const cm = child(decl, 'classMemberDeclaration');
     const si = child(decl, 'staticInitializer');
     const cd = child(decl, 'constructorDeclaration');
@@ -246,10 +268,14 @@ function transformClassBody(body: any, className: string) {
     const fd = child(cm, 'fieldDeclaration');
     const md = child(cm, 'methodDeclaration');
 
+    const memberTokens: string[] = cm
+      ? collectTokenImages(cm).map((t: any) => String(t).toLowerCase())
+      : [];
+
     if (fd) {
       fields.push(...transformFieldDecl(fd));
     } else if (md) {
-      methods.push(transformMethodDecl(md));
+      methods.push(transformMethodDecl(md, [...declModifiers, ...memberTokens, ...declTokensAll]));
     } else {
       // Nested class, etc.
       const tok = firstToken(cm);
@@ -290,14 +316,14 @@ function transformFieldDecl(node: any): FieldDecl[] {
 
 // ── Methods ───────────────────────────────────────────────────────────────────
 
-function transformMethodDecl(node: any): MethodDecl {
+function transformMethodDecl(node: any, inheritedModifiers: string[] = []): MethodDecl {
   const header = child(node, 'methodHeader');
   const body   = child(node, 'methodBody');
 
-  const modTokens: string[] = children(node, 'methodModifier')
-    .flatMap((m: any) => Object.values(m.children ?? {}).flat() as any[])
-    .map((t: any) => t.image ?? '')
-    .filter(Boolean);
+  const modTokens: string[] = [
+    ...collectTokenImages(node).map((t) => String(t).toLowerCase()),
+    ...inheritedModifiers,
+  ];
 
   const isStatic        = modTokens.includes('static');
   const isAbstract      = modTokens.includes('abstract');
@@ -326,10 +352,7 @@ function transformMethodDecl(node: any): MethodDecl {
 function transformInterfaceMethod(node: any): MethodDecl {
   const header     = child(node, 'interfaceMethodHeader') ?? child(node, 'methodHeader');
   const body       = child(node, 'methodBody');
-  const modTokens: string[] = children(node, 'interfaceMethodModifier')
-    .flatMap((m: any) => Object.values(m.children ?? {}).flat() as any[])
-    .map((t: any) => t.image ?? '')
-    .filter(Boolean);
+  const modTokens: string[] = collectTokenImages(node).map((t) => String(t).toLowerCase());
 
   const result     = child(header, 'result');
   const returnType = result && tokenImage(result, 'Void') ? { kind: 'void' as const } : transformType(child(header, 'unannType') ?? result);

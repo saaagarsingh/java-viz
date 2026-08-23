@@ -220,6 +220,27 @@
   color: var(--text-secondary);
 }
 
+.monitor-pill {
+  margin-left: auto;
+  max-width: 72%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  color: var(--text-muted);
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.monitor-pill--active {
+  border-color: rgba(99, 102, 241, 0.55);
+  color: #A5B4FC;
+  background: rgba(99, 102, 241, 0.16);
+}
+
 .region-panel__body {
   flex: 1;
   overflow-y: auto;

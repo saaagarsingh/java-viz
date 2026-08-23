@@ -96,6 +96,24 @@ export function App() {
   const step       = steps[stepIndex];
   const totalSteps = steps.length;
 
+  const ownedHeapLocks = step
+    ? step.heap.filter((obj) => !!obj.monitor?.owner)
+    : [];
+  const heapLockSummary = ownedHeapLocks.length > 0
+    ? ownedHeapLocks
+        .map((obj) => {
+          const owner = obj.monitor?.owner ?? 'unknown';
+          const waiters = obj.monitor?.waitQueue?.length ?? 0;
+          return `${obj.klassName}#${obj.objectId.replace(/^obj-/, '')} by ${owner}${waiters > 0 ? ` (${waiters} waiting)` : ''}`;
+        })
+        .join(' | ')
+    : null;
+  const classMonitorEvent = step?.delta?.monitorOperation?.objectId?.startsWith('klass:')
+    ? `${step.delta.monitorOperation.objectId} by ${step.delta.monitorOperation.threadId}`
+    : null;
+  const lockSummaryText = heapLockSummary ?? classMonitorEvent ?? 'no active lock';
+  const hasActiveLock = !!heapLockSummary || !!classMonitorEvent;
+
   const [showSupport, setShowSupport] = useState(false);
   const [showHeapRefArrows, setShowHeapRefArrows] = useState(false);
   const [revealedHeapRef, setRevealedHeapRef] = useState<HeapRefSelection | null>(null);
@@ -280,6 +298,15 @@ export function App() {
             <section className="region-panel region-panel--heap" aria-label="Heap" style={{ flex: 1, minWidth: COL_MIN }}>
               <div className="region-panel__header">
                 <div className="region-panel__dot" /><span className="region-panel__name">Heap</span>
+                {!noStep && (
+                  <span
+                    className={`monitor-pill${hasActiveLock ? ' monitor-pill--active' : ''}`}
+                    title={lockSummaryText}
+                    aria-label={`Monitor status: ${lockSummaryText}`}
+                  >
+                    lock: {lockSummaryText}
+                  </span>
+                )}
               </div>
               <div className="region-panel__body">
                 {noStep
