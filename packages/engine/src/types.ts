@@ -89,6 +89,12 @@ export interface ITableEntry {
   slots:         VTableSlot[];
 }
 
+export interface StaticMethodInfo {
+  methodName:  string;
+  arity:       number;
+  descriptor:  string;
+}
+
 export interface KlassInfo {
   klassName:      string;
   superKlassName: string | null;
@@ -96,6 +102,7 @@ export interface KlassInfo {
   isInterface:    boolean;
   isInitialized:  boolean;  // false until <clinit> completes
   staticFields:   FieldSlot[];
+  staticMethods?: StaticMethodInfo[]; // explicit static methods (invokestatic)
   vtable:         VTableSlot[];
   itable:         ITableEntry[];
 }

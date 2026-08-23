@@ -123,6 +123,22 @@ export function MetaspacePanel({ klasses, highlights, arrows, heap }: Props) {
                   </div>
                 )}
 
+                {/* static methods */}
+                {(klass.staticMethods?.length ?? 0) > 0 && (
+                  <div>
+                    <div className="klass-card__section-label">static methods</div>
+                    <div className="vtable">
+                      {klass.staticMethods!.map((m, idx) => (
+                        <div key={`${m.methodName}/${m.arity}/${idx}`} className="vtable__row">
+                          <span className="vtable__slot">[S]</span>
+                          <span className="vtable__method">{m.methodName}</span>
+                          <span className="vtable__impl">/{m.arity}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* vtable */}
                 {klass.vtable.length > 0 && !klass.isInterface && (
                   <div>

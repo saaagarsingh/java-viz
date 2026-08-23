@@ -10,6 +10,7 @@ export type {
   HeapObject,
   VTableSlot,
   ITableEntry,
+  StaticMethodInfo,
   KlassInfo,
   Region,
   OperationType,

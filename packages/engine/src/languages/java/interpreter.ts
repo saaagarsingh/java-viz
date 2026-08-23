@@ -287,6 +287,13 @@ export class JavaInterpreter {
       this.ensureInitialized(decl.superclass, callSiteLine);
     }
 
+    // Teaching-model simplification: initialize implemented interfaces when the
+    // implementing class is first initialized so uninit/init badges transition
+    // in a predictable way for learners.
+    for (const iface of decl.interfaces) {
+      this.ensureInitialized(iface, callSiteLine);
+    }
+
     // Evaluate static field initializers
     for (const field of decl.fields.filter(f => f.isStatic)) {
       if (field.initializer) {
@@ -1814,6 +1821,7 @@ export class JavaInterpreter {
         isInterface: true,
         isInitialized: true,
         staticFields: [],
+        staticMethods: [],
         vtable: [],
         itable: [],
       });
@@ -1827,6 +1835,9 @@ export class JavaInterpreter {
         isInterface: false,
         isInitialized: true,
         staticFields: [],
+        staticMethods: [
+          { methodName: 'sleep', arity: 1, descriptor: '(J)V' },
+        ],
         vtable: [
           { slot: 0, methodName: 'toString', arity: 0, descriptor: '()Ljava/lang/String;', implementedBy: 'Object' },
           { slot: 1, methodName: 'equals', arity: 1, descriptor: '(Ljava/lang/Object;)Z', implementedBy: 'Object' },

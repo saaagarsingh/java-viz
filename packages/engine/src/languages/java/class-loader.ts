@@ -112,6 +112,13 @@ function buildKlass(decl: ClassDecl, loaded: Map<string, KlassInfo>): KlassInfo 
   const vtable  = buildVTable(decl, superKlass);
   const itable  = buildITable(decl, loaded);
   const staticFields = buildStaticFieldDefaults(decl.fields.filter(f => f.isStatic));
+  const staticMethods = decl.methods
+    .filter(m => m.isStatic)
+    .map(m => ({
+      methodName: m.name,
+      arity: m.params.length,
+      descriptor: buildDescriptor(m),
+    }));
 
   return {
     klassName:      decl.name,
@@ -120,6 +127,7 @@ function buildKlass(decl: ClassDecl, loaded: Map<string, KlassInfo>): KlassInfo 
     isInterface:    decl.isInterface,
     isInitialized:  false,   // <clinit> has not run yet
     staticFields,
+    staticMethods,
     vtable,
     itable,
   };
