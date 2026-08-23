@@ -5,6 +5,7 @@ interface Props {
   arrows:       Arrow[];
   fadingArrows: string[];
   containerRef: React.RefObject<HTMLElement | null>;
+  collapsedRegions?: Set<'stack' | 'heap' | 'metaspace'>;
   onVisibilityStatsChange?: (stats: { hiddenKlassPtrsFromHeap: number; hiddenTotal: number }) => void;
 }
 
@@ -150,7 +151,7 @@ function clampToBorder(
   return best ? { x: best.x, y: best.y } : { x: bx, y: by };
 }
 
-export function ArrowOverlay({ arrows, fadingArrows, containerRef, onVisibilityStatsChange }: Props) {
+export function ArrowOverlay({ arrows, fadingArrows, containerRef, collapsedRegions, onVisibilityStatsChange }: Props) {
   const [computed, setComputed] = useState<ComputedArrow[]>([]);
   const rafRef = useRef<number | null>(null);
 
@@ -162,6 +163,11 @@ export function ArrowOverlay({ arrows, fadingArrows, containerRef, onVisibilityS
     let hiddenTotal = 0;
     let hiddenKlassPtrsFromHeap = 0;
     for (const arrow of arrows) {
+      // Skip arrows to/from collapsed regions
+      if (collapsedRegions?.has(arrow.from.region) || collapsedRegions?.has(arrow.to.region)) {
+        continue;
+      }
+
       const fromId = elementDomId(arrow, 'from');
       const toId   = elementDomId(arrow, 'to');
       const fromEl = document.getElementById(fromId);
@@ -202,7 +208,7 @@ export function ArrowOverlay({ arrows, fadingArrows, containerRef, onVisibilityS
     }
     setComputed(results);
     onVisibilityStatsChange?.({ hiddenKlassPtrsFromHeap, hiddenTotal });
-  }, [arrows, fadingArrows, containerRef, onVisibilityStatsChange]);
+  }, [arrows, fadingArrows, containerRef, collapsedRegions, onVisibilityStatsChange]);
 
   // Recompute on mount, step change, resize, and any scroll inside the container
   useEffect(() => {

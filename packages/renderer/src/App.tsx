@@ -120,6 +120,15 @@ export function App() {
   const [revealedHeapRef, setRevealedHeapRef] = useState<HeapRefSelection | null>(null);
   const [focusedHeapObjectId, setFocusedHeapObjectId] = useState<string | null>(null);
   const [hiddenHeapKlassPtrCount, setHiddenHeapKlassPtrCount] = useState(0);
+  const [collapsedRegions, setCollapsedRegions] = useState<Set<'stack' | 'heap' | 'metaspace'>>(new Set());
+  const toggleRegionCollapse = useCallback((region: 'stack' | 'heap' | 'metaspace') => {
+    setCollapsedRegions(prev => {
+      const next = new Set(prev);
+      if (next.has(region)) next.delete(region);
+      else next.add(region);
+      return next;
+    });
+  }, []);
 
   // Layout (localStorage-persisted, independent of trace state)
   const [layout, setLayout] = useState<LayoutState>(loadLayout);
@@ -150,6 +159,8 @@ export function App() {
   const fadingArrows = step?.delta?.fadingArrows ?? [];
   const allArrows = step?.arrows ?? [];
   const visibleArrows = allArrows.filter(a => {
+    // Hide arrows to/from collapsed regions
+    if (collapsedRegions.has(a.from.region) || collapsedRegions.has(a.to.region)) return false;
     if (!isHeapReferenceArrow(a)) return true;
     if (showHeapRefArrows) return true;
     return isSelectedHeapReferenceArrow(a, revealedHeapRef);
@@ -183,6 +194,28 @@ export function App() {
   const handleArrowVisibilityStats = useCallback((stats: { hiddenKlassPtrsFromHeap: number; hiddenTotal: number }) => {
     setHiddenHeapKlassPtrCount((prev) => (prev === stats.hiddenKlassPtrsFromHeap ? prev : stats.hiddenKlassPtrsFromHeap));
   }, []);
+
+  // Region summaries
+  const getStackSummary = () => {
+    if (noStep || !step) return 'Stack: empty';
+    const frameCount = step.stack.length;
+    const threadCount = step.threadStates?.size ?? 1;
+    return threadCount > 1
+      ? `Stack: ${frameCount} frames (${threadCount} threads)`
+      : `Stack: ${frameCount} frames`;
+  };
+  const getHeapSummary = () => {
+    if (noStep || !step) return 'Heap: empty';
+    const objectCount = step.heap.length;
+    const lockedCount = step.heap.filter(obj => !!obj.monitor?.owner).length;
+    return lockedCount > 0
+      ? `Heap: ${objectCount} objects (${lockedCount} locked)`
+      : `Heap: ${objectCount} objects`;
+  };
+  const getMetaspaceSummary = () => {
+    if (noStep || !step) return 'Metaspace: empty';
+    return `Metaspace: ${step.metaspace.length} classes`;
+  };
 
   // Empty-state content shown in memory panels when there's no step yet
   const noStep = !step;
@@ -296,19 +329,31 @@ export function App() {
               style={{ width: stackW, minWidth: COL_MIN, flexShrink: 0 }}>
               <div className="region-panel__header">
                 <div className="region-panel__dot" /><span className="region-panel__name">Stack</span>
+                <button
+                  className="region-panel__collapse-toggle"
+                  onClick={() => toggleRegionCollapse('stack')}
+                  aria-label={collapsedRegions.has('stack') ? 'Expand stack' : 'Collapse stack'}
+                  title={collapsedRegions.has('stack') ? 'Expand' : 'Collapse'}
+                >
+                  {collapsedRegions.has('stack') ? 'Expand' : 'Collapse'}
+                </button>
               </div>
-              <div className="region-panel__body">
-                {noStep
-                  ? <p className="empty-state">{status === 'running' ? '⏳ running…' : status === 'error' ? '⚠ error — see logs' : 'no trace'}</p>
-                  : <StackPanel
-                      frames={step.stack}
-                      highlights={highlights}
-                      heap={step.heap}
-                      onFocusHeapObject={focusHeapObject}
-                      {...(step.threadStates ? { threadStates: step.threadStates } : {})}
-                      {...(step.threadDisplayNames ? { threadDisplayNames: step.threadDisplayNames } : {})}
-                    />}
-              </div>
+              {collapsedRegions.has('stack') ? (
+                <div className="region-panel__summary">{getStackSummary()}</div>
+              ) : (
+                <div className="region-panel__body">
+                  {noStep
+                    ? <p className="empty-state">{status === 'running' ? '⏳ running…' : status === 'error' ? '⚠ error — see logs' : 'no trace'}</p>
+                    : <StackPanel
+                        frames={step.stack}
+                        highlights={highlights}
+                        heap={step.heap}
+                        onFocusHeapObject={focusHeapObject}
+                        {...(step.threadStates ? { threadStates: step.threadStates } : {})}
+                        {...(step.threadDisplayNames ? { threadDisplayNames: step.threadDisplayNames } : {})}
+                      />}
+                </div>
+              )}
             </section>
 
             <ResizeHandle axis="x" onResize={d => updateLayout({ stackW: clamp(stackW + d, COL_MIN, 720) })} />
@@ -316,7 +361,7 @@ export function App() {
             <section className="region-panel region-panel--heap" aria-label="Heap" style={{ flex: 1, minWidth: COL_MIN }}>
               <div className="region-panel__header">
                 <div className="region-panel__dot" /><span className="region-panel__name">Heap</span>
-                {!noStep && hiddenHeapKlassPtrCount > 0 && (
+                {!noStep && hiddenHeapKlassPtrCount > 0 && !collapsedRegions.has('heap') && (
                   <span
                     className="heap-hidden-indicator"
                     title={`${hiddenHeapKlassPtrCount} klass pointer arrow(s) hidden because source/target cards are off-screen`}
@@ -334,30 +379,42 @@ export function App() {
                     lock: {lockSummaryText}
                   </span>
                 )}
+                <button
+                  className="region-panel__collapse-toggle"
+                  onClick={() => toggleRegionCollapse('heap')}
+                  aria-label={collapsedRegions.has('heap') ? 'Expand heap' : 'Collapse heap'}
+                  title={collapsedRegions.has('heap') ? 'Expand' : 'Collapse'}
+                >
+                  {collapsedRegions.has('heap') ? 'Expand' : 'Collapse'}
+                </button>
               </div>
-              <div className="region-panel__body" ref={heapBodyRef}>
-                {noStep
-                  ? <p className="empty-state">&nbsp;</p>
-                  : <HeapPanel
-                      objects={step.heap}
-                      highlights={highlights}
-                      arrows={step.arrows}
-                      focusedObjectId={focusedHeapObjectId}
-                      showHeapRefArrows={showHeapRefArrows}
-                      onRevealReference={(sourceObjectId, fieldName, targetObjectId) => {
-                        setRevealedHeapRef(prev => {
-                          if (prev
-                            && prev.sourceObjectId === sourceObjectId
-                            && prev.fieldName === fieldName
-                            && prev.targetObjectId === targetObjectId) {
-                            return null;
-                          }
-                          return { sourceObjectId, fieldName, targetObjectId };
-                        });
-                      }}
-                      {...(step.delta?.monitorOperation ? { monitorObjectId: step.delta.monitorOperation.objectId } : {})}
-                    />}
-              </div>
+              {collapsedRegions.has('heap') ? (
+                <div className="region-panel__summary">{getHeapSummary()}</div>
+              ) : (
+                <div className="region-panel__body" ref={heapBodyRef}>
+                  {noStep
+                    ? <p className="empty-state">&nbsp;</p>
+                    : <HeapPanel
+                        objects={step.heap}
+                        highlights={highlights}
+                        arrows={step.arrows}
+                        focusedObjectId={focusedHeapObjectId}
+                        showHeapRefArrows={showHeapRefArrows}
+                        onRevealReference={(sourceObjectId, fieldName, targetObjectId) => {
+                          setRevealedHeapRef(prev => {
+                            if (prev
+                              && prev.sourceObjectId === sourceObjectId
+                              && prev.fieldName === fieldName
+                              && prev.targetObjectId === targetObjectId) {
+                              return null;
+                            }
+                            return { sourceObjectId, fieldName, targetObjectId };
+                          });
+                        }}
+                        {...(step.delta?.monitorOperation ? { monitorObjectId: step.delta.monitorOperation.objectId } : {})}
+                      />}
+                </div>
+              )}
             </section>
           </div>
 
@@ -475,18 +532,31 @@ export function App() {
           style={{ width: metaspaceW, minWidth: 220, flexShrink: 0 }}>
           <div className="region-panel__header">
             <div className="region-panel__dot" /><span className="region-panel__name">Metaspace</span>
+            <button
+              className="region-panel__collapse-toggle"
+              onClick={() => toggleRegionCollapse('metaspace')}
+              aria-label={collapsedRegions.has('metaspace') ? 'Expand metaspace' : 'Collapse metaspace'}
+              title={collapsedRegions.has('metaspace') ? 'Expand' : 'Collapse'}
+            >
+              {collapsedRegions.has('metaspace') ? 'Expand' : 'Collapse'}
+            </button>
           </div>
-          <div className="region-panel__body">
-            {noStep
-              ? <p className="empty-state">&nbsp;</p>
-              : <MetaspacePanel klasses={step.metaspace} highlights={highlights} arrows={step.arrows} heap={step.heap} />}
-          </div>
+          {collapsedRegions.has('metaspace') ? (
+            <div className="region-panel__summary">{getMetaspaceSummary()}</div>
+          ) : (
+            <div className="region-panel__body">
+              {noStep
+                ? <p className="empty-state">&nbsp;</p>
+                : <MetaspacePanel klasses={step.metaspace} highlights={highlights} arrows={step.arrows} heap={step.heap} />}
+            </div>
+          )}
         </section>
 
         <ArrowOverlay
           arrows={visibleArrows}
           fadingArrows={fadingArrows}
           containerRef={mainRef}
+          collapsedRegions={collapsedRegions}
           onVisibilityStatsChange={handleArrowVisibilityStats}
         />
         {step && <MethodInvocationArrow currentStep={step} containerRef={mainRef} />}

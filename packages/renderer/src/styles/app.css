@@ -220,6 +220,32 @@
   color: var(--text-secondary);
 }
 
+.region-panel__collapse-toggle {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--border-color);
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  transition: all 120ms ease;
+  white-space: nowrap;
+}
+.region-panel__collapse-toggle:hover {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+  background: rgba(148, 163, 184, 0.08);
+}
+.region-panel__collapse-toggle:active {
+  background: rgba(148, 163, 184, 0.12);
+}
+.region-panel__collapse-toggle:focus-visible {
+  outline: 2px solid var(--region-stack);
+  outline-offset: -2px;
+}
+
 .monitor-pill {
   margin-left: auto;
   max-width: 72%;
@@ -264,6 +290,19 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+
+.region-panel__summary {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-3);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  text-align: center;
+  min-height: 100px;
 }
 
 /* ── Bottom panel — code viewer + step info side by side ────── */
