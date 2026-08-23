@@ -4,7 +4,7 @@ This repository is an npm workspace monorepo:
 - `packages/engine` is built and validated during CI.
 - `packages/renderer` is the public web app (Vite build output).
 
-The deploy pipeline is defined in `.github/workflows/vercel-deploy.yml`.
+This setup intentionally avoids GitHub Actions for now.
 
 ## 1) Create Vercel project
 
@@ -17,41 +17,41 @@ The deploy pipeline is defined in `.github/workflows/vercel-deploy.yml`.
 
 These values are also committed in `vercel.json`.
 
-## 2) Add required GitHub repository secrets
+## 2) Choose one deploy path
 
-In GitHub repository settings, add:
-- `VERCEL_TOKEN`
-- `VERCEL_ORG_ID`
-- `VERCEL_PROJECT_ID`
+### Option A: Vercel Git integration (recommended)
 
-How to get them:
-- `VERCEL_TOKEN`: Vercel account settings -> Tokens -> create token.
-- `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID`:
-  1. Run `npx vercel login`
-  2. Run `npx vercel link` in repo root and choose your project.
-  3. Read values from `.vercel/project.json` generated locally.
+1. In Vercel, import this GitHub repository.
+2. Keep build settings from `vercel.json` (or set manually):
+   - Install command: `npm ci`
+   - Build command: `npm run build`
+   - Output directory: `packages/renderer/dist`
+3. Set production branch to `main`.
 
-Example `.vercel/project.json` fields:
-- `orgId`
-- `projectId`
+Behavior:
+- Push to `main` triggers production deploy in Vercel.
+- Pull requests get preview deploys directly from Vercel.
 
-## 3) Deployment behavior
+No GitHub workflow file or GitHub PAT workflow scope is required.
 
-- Pull Request to `main`: preview deployment + PR comment with preview URL.
-- Push to `main`: production deployment.
-- Manual run: supported via workflow dispatch.
+### Option B: Manual CLI deploy
 
-## 4) CI checks before deploy
+Use this when you want to deploy on demand from your machine.
 
-Workflow runs these before Vercel deploy:
+1. Login: `npx vercel login`
+2. Link project once in repo root: `npx vercel link`
+3. Preview deploy: `npx vercel --prod=false`
+4. Production deploy: `npx vercel --prod`
+
+## 3) Local quality check before production deploy
+
+Run:
 - `npm ci`
 - `npm run test --workspace=packages/engine`
 - `npm run build`
 
-If checks fail, deploy is blocked.
+## 4) Optional hardening
 
-## 5) Optional hardening
-
-- Add branch protection on `main` requiring the `Vercel Deploy` workflow.
+- Add branch protection on `main` and require PR review.
 - Configure custom domain and force HTTPS in Vercel project settings.
 - Add Sentry/browser monitoring for runtime client errors.
