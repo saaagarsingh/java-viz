@@ -57,8 +57,22 @@ const SUPPORTED: { label: string; items: string[] }[] = [
       'while loop',
       'for loop (basic 3-part)',
       'break / continue',
+      'synchronized (expr) { ... }',
       'return (with or without value)',
       'System.out.println(...)',
+    ],
+  },
+  {
+    label: 'Concurrency (Phase 2/2.1)',
+    items: [
+      'synchronized instance/static methods',
+      'volatile field declaration + visualization',
+      'Thread(), Thread(String), Thread(Runnable), Thread(Runnable, String)',
+      'Thread.start(), Thread.join(), Thread.join(timeout), Thread.sleep()',
+      'Object.wait(), Object.wait(timeout), Object.notify(), Object.notifyAll()',
+      'Manual thread stepping: Step Thread / Run All',
+      'Thread states: RUNNABLE, WAITING_ON_LOCK, WAITING_ON_THREAD, TERMINATED',
+      'Monitor enter/exit + lock badges (thin/fat lock visualization)',
     ],
   },
   {
@@ -124,8 +138,17 @@ const UNSUPPORTED: { label: string; phase: string; items: string[] }[] = [
       'Multiple vars in one statement',
       'Varargs (...)',
       'Bitwise operators',
-      'synchronized blocks / volatile (Phase 2)',
       'Records, enums, sealed classes',
+    ],
+  },
+  {
+    label: 'Advanced concurrency',
+    phase: 'Future scope',
+    items: [
+      'Real nondeterministic scheduler simulation',
+      'Full Java Memory Model / happens-before visibility semantics',
+      'java.util.concurrent locks and atomics',
+      'Wait/notify spurious wakeups and interruption modeling',
     ],
   },
 ];

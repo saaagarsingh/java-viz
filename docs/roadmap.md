@@ -94,6 +94,8 @@ Current status (2026-08-23):
 - Implemented: thread session workflow (`runThreadSession`, `stepThread`, `drainThreads`) with pending-thread controls in Custom mode.
 - Implemented: Java Thread API subset for teaching flows: `Thread.start()`, `Thread.join()`, `Thread.join(timeout)`, `Thread.sleep()`, and constructors `Thread()`, `Thread(String)`, `Thread(Runnable)`, `Thread(Runnable, String)`.
 - Implemented: `WAITING_ON_THREAD` state and timeout wake-up steps (`thread_join_timeout`, `thread_wakeup`).
+- Implemented (Phase 2.1): monitor condition operations `Object.wait()`, `Object.wait(timeout)`, `Object.notify()`, `Object.notifyAll()` in deterministic stepping mode.
+- Implemented (Phase 2.1): monitor state escalation visualization (`thin-locked` / `fat-locked`) and condition-wait queue tracking.
 - Implemented: stack thread-name badges sourced from thread object names.
 - Implemented: run behavior now starts from the first step in the trace on fresh execution.
 
@@ -114,3 +116,11 @@ This is a side project. If it starts competing with core interview
 prep time (React internals, LLD, HLD, DSA, frontend system design)
 ahead of the Nov 9 deadline, it loses. Weekend-only, and Phase 0 alone
 is a complete enough deliverable to pause on if time gets tight.
+
+## Future scope (after current roadmap)
+
+Concurrency topics intentionally deferred:
+- Spurious wakeups / interruption semantics around `wait()`.
+- Detailed `notify` fairness policies and scheduler-level nondeterminism.
+- `java.util.concurrent` primitives (`ReentrantLock`, `ReadWriteLock`, semaphores, atomics).
+- Full Java Memory Model visibility and ordering guarantees.

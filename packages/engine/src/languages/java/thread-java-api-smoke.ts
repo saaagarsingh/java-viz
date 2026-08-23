@@ -96,6 +96,19 @@ class Main {
 }
 `;
 
+const MONITOR_NOTIFY_SOURCE = `
+class Main {
+  static void main() {
+    Object lock = new Object();
+    synchronized (lock) {
+      lock.notify();
+      lock.notifyAll();
+    }
+    System.out.println("notify-ok");
+  }
+}
+`;
+
 function finalStdout(source: string): string[] {
   const out = runJava(source);
   strictEqual(out.error, null, `unexpected error: ${JSON.stringify(out.error)}`);
@@ -126,6 +139,13 @@ function main() {
   strictEqual(timeoutStdout.includes('worker-done'), true, 'worker should eventually complete');
   strictEqual(timeoutStdout.includes('main-after-timeout'), true, 'main should continue after timeout join');
   strictEqual(timeoutStdout.includes('main-after-join'), true, 'main should complete after full join');
+
+  const notifyRun = runAndCollect(MONITOR_NOTIFY_SOURCE);
+  const notifyLabels = notifyRun.steps.map((s) => s.label);
+  strictEqual(notifyLabels.some((l) => l.includes('monitor_notify —')), true, 'notify() should emit monitor_notify step');
+  strictEqual(notifyLabels.some((l) => l.includes('monitor_notifyAll —')), true, 'notifyAll() should emit monitor_notifyAll step');
+  const notifyStdout = notifyRun.steps[notifyRun.steps.length - 1]?.stdout ?? [];
+  strictEqual(notifyStdout.includes('notify-ok'), true, 'notify smoke should complete successfully');
 
   console.log('PASS thread Java API smoke');
 }

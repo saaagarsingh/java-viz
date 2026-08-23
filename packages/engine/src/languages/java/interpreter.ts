@@ -124,6 +124,7 @@ interface ObjectLock {
   owner:       string | null;    // threadId holding the lock (null when released between handoff)
   depth:       number;           // reentrant lock depth (how many times locked by owner)
   waitQueue:   string[];         // threadIds waiting for this lock
+  conditionQueue: string[];      // threadIds waiting via Object.wait()
   acquiredAt:  number;           // step index when first acquired
 }
 
@@ -715,6 +716,27 @@ export class JavaInterpreter {
         throw new InterpreterHalt({ kind: 'runtime_error', message: 'Thread.join supports arity 0 or 1 in this phase' });
       }
       return this.intrinsicThreadJoin(receiverVal.objectId, argValues[0], expr.loc.line);
+    }
+
+    if (expr.method === 'wait') {
+      if (argValues.length > 1) {
+        throw new InterpreterHalt({ kind: 'runtime_error', message: 'Object.wait supports arity 0 or 1 in this phase' });
+      }
+      return this.intrinsicObjectWait(receiverVal.objectId, argValues[0], expr.loc.line);
+    }
+
+    if (expr.method === 'notify') {
+      if (argValues.length !== 0) {
+        throw new InterpreterHalt({ kind: 'runtime_error', message: 'Object.notify requires zero arguments' });
+      }
+      return this.intrinsicObjectNotify(receiverVal.objectId, false, expr.loc.line);
+    }
+
+    if (expr.method === 'notifyAll') {
+      if (argValues.length !== 0) {
+        throw new InterpreterHalt({ kind: 'runtime_error', message: 'Object.notifyAll requires zero arguments' });
+      }
+      return this.intrinsicObjectNotify(receiverVal.objectId, true, expr.loc.line);
     }
 
     // vtable lookup: follow klass ptr → find slot
@@ -1710,8 +1732,25 @@ export class JavaInterpreter {
       if (this.schedulerTick < thread.waitUntilTick) continue;
 
       const reason = thread.waitingOn ?? 'thread';
-      thread.status = 'RUNNABLE';
-      thread.waitingOn = null;
+      if (reason.startsWith('wait:')) {
+        const objectId = reason.slice('wait:'.length);
+        const lock = this.locks.get(objectId);
+        if (lock) {
+          lock.conditionQueue = lock.conditionQueue.filter(tid => tid !== thread.threadId);
+          if (!lock.waitQueue.includes(thread.threadId)) {
+            lock.waitQueue.push(thread.threadId);
+          }
+          const canRunNow = lock.owner === null && lock.waitQueue[0] === thread.threadId;
+          thread.status = canRunNow ? 'RUNNABLE' : 'WAITING_ON_LOCK';
+          thread.waitingOn = canRunNow ? null : objectId;
+        } else {
+          thread.status = 'RUNNABLE';
+          thread.waitingOn = null;
+        }
+      } else {
+        thread.status = 'RUNNABLE';
+        thread.waitingOn = null;
+      }
       thread.waitUntilTick = null;
       const wakeLine = thread.waitingLine;
       thread.waitingLine = null;
@@ -1720,6 +1759,8 @@ export class JavaInterpreter {
         operation: 'return',
         description: reason.startsWith('sleep:')
           ? `thread_wakeup — ${thread.threadId} resumed after sleep timeout`
+          : reason.startsWith('wait:')
+          ? `thread_wakeup — ${thread.threadId} wait timeout on ${reason.slice('wait:'.length)}`
           : `thread_wakeup — ${thread.threadId} resumed after join timeout`,
         highlightedElements: [],
         newArrows: [],
@@ -1890,12 +1931,12 @@ export class JavaInterpreter {
       let monitor: any = null;
 
       if (lock) {
-        // Object is locked
-        markWord = { kind: 'thin-locked', threadId: lock.owner };
+        markWord = this.lockMarkWord(lock);
         monitor = {
           owner: lock.owner,
           depth: lock.depth,
           waitQueue: lock.waitQueue,
+          conditionQueue: lock.conditionQueue,
           acquiredAt: lock.acquiredAt,
         };
       }
@@ -2056,6 +2097,7 @@ export class JavaInterpreter {
         owner: threadId,
         depth: 1,
         waitQueue: [],
+        conditionQueue: [],
         acquiredAt: this.steps.length,
       };
       this.locks.set(objectId, lock);
@@ -2075,7 +2117,7 @@ export class JavaInterpreter {
           kind: 'monitor_enter',
           objectId,
           threadId,
-          markWord: { kind: 'thin-locked', threadId },
+          markWord: this.lockMarkWord(lock),
         },
       });
     } else if (lock.owner === threadId) {
@@ -2096,7 +2138,7 @@ export class JavaInterpreter {
           kind: 'monitor_enter',
           objectId,
           threadId,
-          markWord: { kind: 'thin-locked', threadId },
+          markWord: this.lockMarkWord(lock),
         },
       });
     } else if (lock.owner === null) {
@@ -2122,7 +2164,7 @@ export class JavaInterpreter {
             kind: 'monitor_enter',
             objectId,
             threadId,
-            markWord: { kind: 'thin-locked', threadId },
+            markWord: this.lockMarkWord(lock),
           },
         });
       } else {
@@ -2168,7 +2210,7 @@ export class JavaInterpreter {
           kind: 'monitor_enter',
           objectId,
           threadId,
-          markWord: { kind: 'thin-locked', threadId: lock.owner },
+          markWord: this.lockMarkWord(lock),
         },
       });
 
@@ -2201,8 +2243,8 @@ export class JavaInterpreter {
         thread.waitingOn = null;
         thread.waitUntilTick = null;
         thread.waitingLine = null;
-      } else {
-        // No waiters, remove lock
+      } else if (lock.conditionQueue.length === 0) {
+        // No waiters and no condition waiters, remove lock
         this.locks.delete(objectId);
       }
     }
@@ -2217,9 +2259,120 @@ export class JavaInterpreter {
         kind: 'monitor_exit',
         objectId,
         threadId,
-          markWord: lock && lock.owner && lock.depth > 0 ? { kind: 'thin-locked', threadId: lock.owner } : 'unlocked',
+        markWord: this.lockMarkWord(lock),
       },
     });
+  }
+
+  private intrinsicObjectWait(objectId: string, timeoutArg: Value | undefined, lineHint: number | null): Value {
+    const lock = this.locks.get(objectId);
+    const threadId = this.currentThreadId;
+    if (!lock || lock.owner !== threadId) {
+      throw new InterpreterHalt({ kind: 'runtime_error', message: `IllegalMonitorStateException: ${threadId} does not own monitor ${objectId} for wait()` });
+    }
+
+    const timeoutTicks = timeoutArg ? this.normalizeTimeoutTicks(timeoutArg, { line: lineHint ?? 0, column: 0 }) : null;
+    if (!lock.conditionQueue.includes(threadId)) {
+      lock.conditionQueue.push(threadId);
+    }
+
+    // wait() releases monitor ownership completely before parking
+    lock.owner = null;
+    lock.depth = 0;
+
+    const current = this.getOrCreateThread(threadId);
+    current.status = 'WAITING_ON_THREAD';
+    current.waitingOn = `wait:${objectId}`;
+    current.waitUntilTick = timeoutTicks ? (this.schedulerTick + timeoutTicks) : null;
+    current.waitingLine = lineHint;
+
+    this.emitStep(lineHint, {
+      operation: 'monitor_wait',
+      description: timeoutTicks
+        ? `monitor_wait — ${threadId} waiting on ${objectId} (timeout ${timeoutTicks} tick(s))`
+        : `monitor_wait — ${threadId} waiting on ${objectId}`,
+      highlightedElements: [{ region: 'heap', elementId: objectId }],
+      newArrows: [],
+      fadingArrows: [],
+      monitorOperation: {
+        kind: 'monitor_wait',
+        objectId,
+        threadId,
+        markWord: this.lockMarkWord(lock),
+      },
+    });
+
+    // Fair handoff after releasing monitor from wait()
+    const nextWaiter = lock.waitQueue[0];
+    if (nextWaiter) {
+      const t = this.getOrCreateThread(nextWaiter);
+      t.status = 'RUNNABLE';
+      t.waitingOn = null;
+      t.waitUntilTick = null;
+      t.waitingLine = null;
+    } else if (lock.conditionQueue.length === 0) {
+      // No lock waiters and no condition waiters left: fully unlocked monitor metadata can be removed.
+      this.locks.delete(objectId);
+    }
+
+    throw new ThreadBlocked(`wait:${objectId}`);
+  }
+
+  private intrinsicObjectNotify(objectId: string, notifyAll: boolean, lineHint: number | null): Value {
+    const lock = this.locks.get(objectId);
+    const threadId = this.currentThreadId;
+    if (!lock || lock.owner !== threadId) {
+      throw new InterpreterHalt({ kind: 'runtime_error', message: `IllegalMonitorStateException: ${threadId} does not own monitor ${objectId} for notify()` });
+    }
+
+    const resumed: string[] = [];
+    if (notifyAll) {
+      while (lock.conditionQueue.length > 0) {
+        const waiter = lock.conditionQueue.shift()!;
+        resumed.push(waiter);
+      }
+    } else {
+      const waiter = lock.conditionQueue.shift();
+      if (waiter) resumed.push(waiter);
+    }
+
+    for (const waiterId of resumed) {
+      const waiter = this.getOrCreateThread(waiterId);
+      waiter.status = 'WAITING_ON_LOCK';
+      waiter.waitingOn = objectId;
+      waiter.waitUntilTick = null;
+      waiter.waitingLine = lineHint;
+      if (!lock.waitQueue.includes(waiterId)) {
+        lock.waitQueue.push(waiterId);
+      }
+    }
+
+    this.emitStep(lineHint, {
+      operation: 'monitor_notify',
+      description: notifyAll
+        ? `monitor_notifyAll — ${threadId} notified ${resumed.length} waiter(s) on ${objectId}`
+        : `monitor_notify — ${threadId} notified ${resumed.length} waiter(s) on ${objectId}`,
+      highlightedElements: [{ region: 'heap', elementId: objectId }],
+      newArrows: [],
+      fadingArrows: [],
+      monitorOperation: {
+        kind: 'monitor_notify',
+        objectId,
+        threadId,
+        markWord: this.lockMarkWord(lock),
+      },
+    });
+
+    return { kind: 'uninitialized' };
+  }
+
+  private lockMarkWord(lock: ObjectLock | undefined): import('../../types.js').MarkWordState {
+    if (!lock || !lock.owner || lock.depth <= 0) return 'unlocked';
+    const isFat = lock.depth > 1 || lock.waitQueue.length > 0 || lock.conditionQueue.length > 0;
+    if (isFat) {
+      return { kind: 'fat-locked', threadId: lock.owner };
+    }
+    return { kind: 'thin-locked', threadId: lock.owner };
   }
 
   private detectDeadlockCycle(startThreadId: string): string[] | null {

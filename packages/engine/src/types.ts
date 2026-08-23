@@ -32,6 +32,7 @@ export interface MonitorState {
   owner:       string;       // threadId holding the lock
   depth:       number;       // reentrant lock depth
   waitQueue:   string[];     // threadIds waiting for this lock
+  conditionQueue?: string[]; // threadIds waiting via Object.wait()
   acquiredAt:  number;       // step index when first acquired
 }
 
@@ -121,7 +122,9 @@ export type OperationType =
   | 'throw'
   | 'catch'
   | 'monitor_enter'       // NEW (Phase 2): acquire lock
-  | 'monitor_exit';       // NEW (Phase 2): release lock
+  | 'monitor_exit'        // NEW (Phase 2): release lock
+  | 'monitor_wait'        // NEW (Phase 2.1): wait on monitor condition
+  | 'monitor_notify';     // NEW (Phase 2.1): notify monitor waiters
 
 export interface ArrowEndpoint {
   region:     Region;
@@ -149,7 +152,7 @@ export interface HighlightTarget {
 }
 
 export interface MonitorOperation {
-  kind:      'monitor_enter' | 'monitor_exit';
+  kind:      'monitor_enter' | 'monitor_exit' | 'monitor_wait' | 'monitor_notify';
   objectId:  string;
   threadId:  string;
   markWord:  MarkWordState;
