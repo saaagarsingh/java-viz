@@ -52,14 +52,16 @@ export interface LoadedClasses {
 
 export function loadClasses(program: Program): LoadedClasses {
   const decls = new Map<string, ClassDecl>(program.classes.map(c => [c.name, c]));
+  const builtinClasses = new Set(['Object', 'Thread']);
+  const builtinInterfaces = new Set(['Runnable']);
 
   // Validate: all supers and interfaces must be declared
   for (const c of program.classes) {
-    if (c.superclass && c.superclass !== 'Object' && !decls.has(c.superclass)) {
+    if (c.superclass && !builtinClasses.has(c.superclass) && !decls.has(c.superclass)) {
       throw new ClassLoadError(`Class "${c.name}" extends unknown class "${c.superclass}"`);
     }
     for (const iface of c.interfaces) {
-      if (!decls.has(iface)) {
+      if (!decls.has(iface) && !builtinInterfaces.has(iface)) {
         throw new ClassLoadError(`Class "${c.name}" implements unknown interface "${iface}"`);
       }
     }

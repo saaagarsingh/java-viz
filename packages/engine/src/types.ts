@@ -35,7 +35,7 @@ export interface MonitorState {
   acquiredAt:  number;       // step index when first acquired
 }
 
-export type ThreadStatus = 'CREATED' | 'RUNNABLE' | 'WAITING_ON_LOCK' | 'TERMINATED';
+export type ThreadStatus = 'CREATED' | 'RUNNABLE' | 'WAITING_ON_LOCK' | 'WAITING_ON_THREAD' | 'TERMINATED';
 
 // ── Stack ────────────────────────────────────────────────────────────────────
 
@@ -195,4 +195,5 @@ export interface Step {
   // NEW (Phase 2): Thread state (optional for now)
   activeThreadId?:    string;                        // which thread owns this step
   threadStates?:      Map<string, ThreadStatus>;     // status of all threads
+  threadDisplayNames?: Map<string, string>;          // threadId -> display name (e.g., constructor name)
 }

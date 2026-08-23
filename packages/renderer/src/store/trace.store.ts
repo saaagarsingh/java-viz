@@ -20,6 +20,10 @@ export type InterpreterStatus = 'idle' | 'running' | 'done' | 'error';
 export type TraceMode = 'example' | 'custom';
 export type SupportedLang = 'java';   // future: | 'python' | 'kotlin'
 
+export type ToastState =
+  | { kind: 'error'; message: string }
+  | { kind: 'success'; message: string };
+
 // ── Store shape ───────────────────────────────────────────────────────────────
 
 interface TraceState {
@@ -36,7 +40,11 @@ interface TraceState {
   stepIndex:  number;
 
   // Toast
-  toast:       ExecutionError | null;  // shown until dismissed
+  toast:       ToastState | null;  // shown until dismissed
+
+  // Thread stepping (Phase 2)
+  pendingThreads: string[];
+  selectedThreadId: string | null;
 }
 
 interface TraceActions {
@@ -51,6 +59,8 @@ interface TraceActions {
   // Interpreter lifecycle (worker calls these)
   setRunning:     () => void;
   setResult:      (steps: Step[], error: ExecutionError | null) => void;
+  setSessionResult: (steps: Step[], error: ExecutionError | null, pendingThreads: string[]) => void;
+  setSelectedThreadId: (threadId: string | null) => void;
 
   // Toast
   dismissToast:   () => void;
@@ -96,6 +106,8 @@ export const useTraceStore = create<TraceStore>()(
       error:     null,
       stepIndex: 0,
       toast:     null,
+      pendingThreads: [],
+      selectedThreadId: null,
 
       // ── actions ──────────────────────────────────────────────────
       selectExample: (idx) => {
@@ -109,22 +121,24 @@ export const useTraceStore = create<TraceStore>()(
           stepIndex:  0,
           status:     'done',
           toast:      null,
+          pendingThreads: [],
+          selectedThreadId: null,
         });
       },
 
       setMode: (mode) => set({
         mode,
         // Switching to custom always starts clean — don't bleed example trace into custom view
-        ...(mode === 'custom' ? { status: 'idle', steps: [], error: null, stepIndex: 0, toast: null } : {}),
+        ...(mode === 'custom' ? { status: 'idle', steps: [], error: null, stepIndex: 0, toast: null, pendingThreads: [], selectedThreadId: null } : {}),
       }),
 
       setCustomSource: (src) => set({
         customSource: src,
         // Editing the source invalidates the current trace
-        status: 'idle', steps: [], error: null, stepIndex: 0, toast: null,
+        status: 'idle', steps: [], error: null, stepIndex: 0, toast: null, pendingThreads: [], selectedThreadId: null,
       }),
 
-      clearExecution: () => set({ status: 'idle', steps: [], error: null, stepIndex: 0, toast: null }),
+      clearExecution: () => set({ status: 'idle', steps: [], error: null, stepIndex: 0, toast: null, pendingThreads: [], selectedThreadId: null }),
 
       setStepIndex: (i) => {
         const { steps } = get();
@@ -141,7 +155,7 @@ export const useTraceStore = create<TraceStore>()(
         if (stepIndex > 0) set({ stepIndex: stepIndex - 1 });
       },
 
-      setRunning: () => set({ status: 'running', error: null, toast: null, steps: [], stepIndex: 0 }),
+      setRunning: () => set({ status: 'running', error: null, toast: null, steps: [], stepIndex: 0, pendingThreads: [], selectedThreadId: null }),
 
       setResult: (steps, error) => {
         set({
@@ -149,9 +163,48 @@ export const useTraceStore = create<TraceStore>()(
           error,
           stepIndex: 0,
           status:    error ? 'error' : 'done',
-          toast:     error ?? null,   // surface error as toast
+          toast:     error ? { kind: 'error', message: errorSummary(error) } : null,
+          pendingThreads: [],
+          selectedThreadId: null,
         });
       },
+
+      setSessionResult: (steps, error, pendingThreads) => {
+        const prevStatus = get().status;
+        const prevPending = get().pendingThreads;
+        const prevSelected = get().selectedThreadId;
+        const selectedThreadId =
+          prevSelected && pendingThreads.includes(prevSelected)
+            ? prevSelected
+            : (pendingThreads[0] ?? null);
+
+        const spawned = pendingThreads.filter((tid) => !prevPending.includes(tid));
+        let toast: ToastState | null = null;
+        if (error) {
+          toast = { kind: 'error', message: errorSummary(error) };
+        } else if (spawned.length > 0) {
+          const msg = spawned.length === 1
+            ? `Thread spawned: ${spawned[0]}`
+            : `Threads spawned: ${spawned.join(', ')}`;
+          toast = { kind: 'success', message: msg };
+        }
+
+        set({
+          steps,
+          error,
+          // Fresh runs should begin at the first snapshot; interactive thread stepping
+          // keeps focus on the newest snapshot appended to the trace.
+          stepIndex: prevStatus === 'running'
+            ? 0
+            : (steps.length > 0 ? steps.length - 1 : 0),
+          status: error ? 'error' : 'done',
+          toast,
+          pendingThreads,
+          selectedThreadId,
+        });
+      },
+
+      setSelectedThreadId: (threadId) => set({ selectedThreadId: threadId }),
 
       dismissToast: () => set({ toast: null }),
     }),

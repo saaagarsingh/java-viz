@@ -6,13 +6,19 @@
   "main": "./src/index.ts",
   "scripts": {
     "build": "tsc --noEmit",
-    "test": "node --experimental-vm-modules node_modules/.bin/jest"
+    "test": "node --experimental-vm-modules node_modules/.bin/jest",
+    "test:thread-session-parity": "tsx src/languages/java/thread-session-parity-test.ts",
+    "smoke:thread-session": "tsx src/languages/java/thread-session-smoke.ts",
+    "test:thread-locks": "tsx src/languages/java/thread-lock-behavior-test.ts",
+    "analyze:thread-parser": "tsx src/languages/java/thread-parser-sweep.ts",
+    "smoke:thread-java-api": "tsx src/languages/java/thread-java-api-smoke.ts"
   },
   "devDependencies": {
     "@types/jest": "^29.0.0",
     "@types/node": "^22.20.1",
     "jest": "^29.0.0",
     "ts-jest": "^29.0.0",
+    "tsx": "^4.23.12",
     "typescript": "^5.5.0"
   },
   "dependencies": {

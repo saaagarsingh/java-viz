@@ -8,18 +8,91 @@
  * If the interpreter exceeds WORKER_TIMEOUT_MS the worker is terminated
  * by the main thread (see useInterpreter hook).
  */
-import { runJava } from '@jvm-viz/engine/languages/java';
+import { runJava, runJavaThreadSession } from '@jvm-viz/engine/languages/java';
 import type { TraceResult } from '@jvm-viz/engine/languages/java';
+import type { ThreadExecutionSession, ThreadSteppingState } from '@jvm-viz/engine';
 
-self.onmessage = (e: MessageEvent<{ source: string; lang: string }>) => {
-  const { source, lang } = e.data;
-  let result: TraceResult;
+type WorkerRequest =
+  | { type: 'run'; source: string; lang: string }
+  | { type: 'runThreadSession'; source: string; lang: string }
+  | { type: 'stepThread'; threadId: string }
+  | { type: 'drainThreads' };
 
-  if (lang === 'java') {
-    result = runJava(source);
-  } else {
-    result = { steps: [], error: { kind: 'runtime_error', message: `Language "${lang}" is not yet supported` } };
+type WorkerResponse =
+  | { type: 'result'; result: TraceResult }
+  | { type: 'sessionResult'; result: TraceResult; pendingThreads: string[] }
+  | { type: 'stepResult'; result: ThreadSteppingState }
+  | { type: 'error'; error: TraceResult['error'] };
+
+let threadSession: ThreadExecutionSession | null = null;
+
+self.onmessage = (e: MessageEvent<WorkerRequest>) => {
+  const msg = e.data;
+
+  if (msg.type === 'run') {
+    threadSession = null;
+    let result: TraceResult;
+    if (msg.lang === 'java') {
+      result = runJava(msg.source);
+    } else {
+      result = {
+        steps: [],
+        error: { kind: 'runtime_error', message: `Language "${msg.lang}" is not yet supported` },
+      };
+    }
+
+    const payload: WorkerResponse = { type: 'result', result };
+    self.postMessage(payload);
+    return;
   }
 
-  self.postMessage(result);
+  if (msg.type === 'runThreadSession') {
+    threadSession = null;
+    if (msg.lang !== 'java') {
+      const payload: WorkerResponse = {
+        type: 'error',
+        error: { kind: 'runtime_error', message: `Language "${msg.lang}" is not yet supported` },
+      };
+      self.postMessage(payload);
+      return;
+    }
+
+    const sessionOrErr = runJavaThreadSession(msg.source);
+    if ('error' in sessionOrErr) {
+      const payload: WorkerResponse = { type: 'error', error: sessionOrErr.error };
+      self.postMessage(payload);
+      return;
+    }
+
+    threadSession = sessionOrErr;
+    const payload: WorkerResponse = {
+      type: 'sessionResult',
+      result: threadSession.initial,
+      pendingThreads: threadSession.pendingThreads(),
+    };
+    self.postMessage(payload);
+    return;
+  }
+
+  if (!threadSession) {
+    const payload: WorkerResponse = {
+      type: 'error',
+      error: { kind: 'runtime_error', message: 'No active thread session. Run program first.' },
+    };
+    self.postMessage(payload);
+    return;
+  }
+
+  if (msg.type === 'stepThread') {
+    const result = threadSession.stepThread(msg.threadId);
+    const payload: WorkerResponse = { type: 'stepResult', result };
+    self.postMessage(payload);
+    return;
+  }
+
+  if (msg.type === 'drainThreads') {
+    const result = threadSession.drain();
+    const payload: WorkerResponse = { type: 'stepResult', result };
+    self.postMessage(payload);
+  }
 };

@@ -41,10 +41,11 @@ export function App() {
 
   const {
     mode, exampleIdx, customSource, status, steps, error: execError, stepIndex,
-    selectExample, setMode, setCustomSource, stepForward, stepBack, clearExecution,
+    pendingThreads, selectedThreadId,
+    selectExample, setMode, setCustomSource, stepForward, stepBack, clearExecution, setSelectedThreadId,
   } = useTraceStore();
 
-  const { run } = useInterpreter();
+  const { runThreadSession, stepThread, drainThreads } = useInterpreter();
 
   const step       = steps[stepIndex];
   const totalSteps = steps.length;
@@ -81,6 +82,12 @@ export function App() {
   const currentTrace  = traces[exampleIdx];
   const displaySource = mode === 'example' ? (currentTrace?.sourceCode ?? '') : customSource;
   const hasError      = status === 'error' && !!execError;
+  const looksLikeThreadUsage = /\bThread\b|\.start\s*\(/.test(customSource);
+  const shouldShowThreadHint =
+    mode === 'custom' &&
+    status === 'done' &&
+    pendingThreads.length === 0 &&
+    looksLikeThreadUsage;
 
   const highlights   = step?.delta?.highlightedElements ?? [];
   const fadingArrows = step?.delta?.fadingArrows ?? [];
@@ -123,6 +130,45 @@ export function App() {
           </span>
         )}
 
+        {shouldShowThreadHint && (
+          <span className="status-banner" title="Thread scheduling hint">
+            ℹ thread code detected: Thread.start() and Thread.join() are supported for basic scheduling in this phase
+          </span>
+        )}
+
+        {mode === 'custom' && status === 'done' && pendingThreads.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }} aria-label="Thread stepping controls">
+            <select
+              className="toolbar__example-select"
+              value={selectedThreadId ?? pendingThreads[0]}
+              onChange={(e) => setSelectedThreadId(e.target.value)}
+              aria-label="Select worker thread"
+              style={{ minWidth: 140 }}
+            >
+              {pendingThreads.map((tid) => (
+                <option key={tid} value={tid}>{tid}</option>
+              ))}
+            </select>
+            <button
+              className="stepper__btn"
+              onClick={() => selectedThreadId && stepThread(selectedThreadId)}
+              disabled={!selectedThreadId}
+              aria-label="Step selected thread"
+              title="Step selected thread"
+            >
+              Step Thread
+            </button>
+            <button
+              className="stepper__btn"
+              onClick={drainThreads}
+              aria-label="Run all pending threads"
+              title="Run all pending threads"
+            >
+              Run All
+            </button>
+          </div>
+        )}
+
         <button
           className={`toolbar__support-btn${showSupport ? ' toolbar__support-btn--active' : ''}`}
           onClick={() => setShowSupport(s => !s)}
@@ -161,6 +207,7 @@ export function App() {
                     highlights={highlights}
                     heap={step.heap}
                     {...(step.threadStates ? { threadStates: step.threadStates } : {})}
+                    {...(step.threadDisplayNames ? { threadDisplayNames: step.threadDisplayNames } : {})}
                   />}
             </div>
           </section>
@@ -228,7 +275,7 @@ export function App() {
               )}
               <button
                 className={`run-btn${status === 'running' ? ' run-btn--running' : ''}`}
-                onClick={() => run(customSource)}
+                onClick={() => runThreadSession(customSource)}
                 disabled={status === 'running' || !customSource.trim()}
                 style={{ marginLeft: step?.sourceLineNumber != null ? undefined : 'auto' }}
               >
@@ -258,7 +305,7 @@ export function App() {
               <CustomEditor
                 value={customSource}
                 onChange={setCustomSource}
-                onRun={() => run(customSource)}
+                onRun={() => runThreadSession(customSource)}
                 isRunning={status === 'running'}
               />
             )}

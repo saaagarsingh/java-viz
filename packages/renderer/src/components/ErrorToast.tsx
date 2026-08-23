@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useTraceStore } from '../store/trace.store.js';
 
-/** Auto-dismisses after 6 seconds. Lives at fixed bottom-right. */
+/** Auto-dismisses after 6 seconds. Lives at fixed top-right. */
 export function ErrorToast() {
   const { toast, dismissToast } = useTraceStore();
 
@@ -12,12 +12,12 @@ export function ErrorToast() {
   }, [toast, dismissToast]);
 
   if (!toast) return null;
-
-  const message = 'Error occurred';
+  const isError = toast.kind === 'error';
+  const message = toast.message;
 
   return (
-    <div className="error-toast" role="alert" aria-live="assertive">
-      <span className="error-toast__icon">⚠</span>
+    <div className={`error-toast ${isError ? 'error-toast--error' : 'error-toast--success'}`} role="alert" aria-live="assertive">
+      <span className="error-toast__icon">{isError ? '⚠' : '✓'}</span>
       <span className="error-toast__message">{message}</span>
       <button
         className="error-toast__close"

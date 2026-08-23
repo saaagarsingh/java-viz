@@ -7,6 +7,7 @@ interface Props {
   highlights:    HighlightTarget[];
   heap:          HeapObject[];
   threadStates?: Map<string, ThreadStatus>;
+  threadDisplayNames?: Map<string, string>;
 }
 
 /** Fixed palette — one color per thread, cycling after 4 */
@@ -32,10 +33,10 @@ function isHighlighted(highlights: HighlightTarget[], frameId: string, field?: s
 function StatusBadge({ status }: { status: ThreadStatus }) {
   const cls =
     status === 'RUNNABLE'        ? 'thread-badge thread-badge--runnable'   :
-    status === 'WAITING_ON_LOCK' ? 'thread-badge thread-badge--waiting'    :
+    status === 'WAITING_ON_LOCK' || status === 'WAITING_ON_THREAD' ? 'thread-badge thread-badge--waiting'    :
     status === 'TERMINATED'      ? 'thread-badge thread-badge--terminated' :
                                    'thread-badge thread-badge--created';
-  const label = status === 'WAITING_ON_LOCK' ? 'WAITING' : status;
+  const label = status === 'WAITING_ON_LOCK' || status === 'WAITING_ON_THREAD' ? 'WAITING' : status;
   return <span className={cls}>{label}</span>;
 }
 
@@ -96,7 +97,7 @@ function FrameCard({
   );
 }
 
-export function StackPanel({ frames, highlights, heap, threadStates }: Props) {
+export function StackPanel({ frames, highlights, heap, threadStates, threadDisplayNames }: Props) {
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
 
   // Build objectId → klassName index once per render for O(1) ref lookup
@@ -118,6 +119,7 @@ export function StackPanel({ frames, highlights, heap, threadStates }: Props) {
   if (groups.size === 1) {
     const [tid, threadFrames] = [...groups][0]!;
     const color = threadColor(tid);
+    const displayName = threadDisplayNames?.get(tid);
     return (
       <>
         {[...threadFrames].reverse().map((frame, i) => (
@@ -125,6 +127,11 @@ export function StackPanel({ frames, highlights, heap, threadStates }: Props) {
         ))}
         <div className="thread-label-single" style={{ borderLeftColor: color }}>
           {tid}
+          {displayName && tid !== 'main' && (
+            <span className="thread-name-badge" title="Thread object name">
+              {displayName}
+            </span>
+          )}
         </div>
       </>
     );
@@ -135,10 +142,11 @@ export function StackPanel({ frames, highlights, heap, threadStates }: Props) {
     <>
       {[...groups.entries()].map(([tid, threadFrames]) => {
         const status: ThreadStatus = threadStates?.get(tid) ?? 'RUNNABLE';
-        const isBlocked  = status === 'WAITING_ON_LOCK' || status === 'TERMINATED';
+        const isBlocked  = status === 'WAITING_ON_LOCK' || status === 'WAITING_ON_THREAD' || status === 'TERMINATED';
         const isExpanded = tid in overrides ? overrides[tid]! : !isBlocked;
         const color      = threadColor(tid);
         const topFrame   = threadFrames[threadFrames.length - 1]!;
+        const displayName = threadDisplayNames?.get(tid);
 
         return (
           <div
@@ -154,6 +162,11 @@ export function StackPanel({ frames, highlights, heap, threadStates }: Props) {
               <span className="thread-section__name">
                 <span className="thread-section__dot" style={{ background: color }} />
                 {tid}
+                {displayName && tid !== 'main' && (
+                  <span className="thread-name-badge" title="Thread object name">
+                    {displayName}
+                  </span>
+                )}
               </span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <StatusBadge status={status} />
