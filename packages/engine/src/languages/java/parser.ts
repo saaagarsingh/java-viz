@@ -1177,6 +1177,14 @@ function transformLiteralNode(literalNode: any): Expr {
   if (c.Null) return { kind: 'NullLiteral', loc: loc(c.Null[0]) };
   if (c.True) return { kind: 'BoolLiteral', value: true,  loc: loc(c.True[0]) };
   if (c.False)return { kind: 'BoolLiteral', value: false, loc: loc(c.False[0]) };
+
+  // Fallback for CST variants where the literal token is attached directly
+  // under an unexpected key (e.g., token-type name casing differences).
+  const leaf = Object.values(c as Record<string, any[]>)
+    .flat()
+    .find((n: any) => n?.image !== undefined);
+  if (leaf) return transformLiteral(leaf);
+
   throw new ParseError(`Unknown literal node at line ${loc(literalNode).line}`);
 }
 
