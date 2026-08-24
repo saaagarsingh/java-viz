@@ -40,11 +40,14 @@ function arrowStyle(op: OperationType): {
       return { stroke: '#38BDF8', strokeDasharray: '4 3', markerEnd: 'url(#arrow-open)' };
     case 'getfield':
     case 'getstatic':
+    case 'array_load':
     case 'return':
       return { stroke: '#A1A1AA', strokeDasharray: '3 3', markerEnd: 'url(#arrow-hollow)' };
     case 'putfield':
     case 'putstatic':
     case 'new_object':
+    case 'array_create':
+    case 'array_store':
       return { stroke: '#F59E0B', markerEnd: 'url(#arrow-write)' };
     default:
       return { stroke: '#60A5FA', markerEnd: 'url(#arrow-filled)' };

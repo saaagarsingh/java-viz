@@ -1067,6 +1067,64 @@
   padding: 6px 8px;
 }
 
+.array-card__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  border-bottom: 1px dashed rgba(148, 163, 184, 0.25);
+  padding-bottom: 6px;
+  margin-bottom: 2px;
+}
+
+.array-card__meta-range {
+  color: var(--text-secondary);
+}
+
+.array-card__index {
+  color: var(--region-heap);
+}
+
+.array-card__pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(148, 163, 184, 0.25);
+}
+
+.array-card__pager-btn {
+  border: 1px solid var(--region-heap-dim);
+  background: rgba(245, 158, 11, 0.08);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.array-card__pager-btn:hover:not(:disabled) {
+  background: rgba(245, 158, 11, 0.18);
+  border-color: var(--region-heap);
+}
+
+.array-card__pager-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.array-card__pager-text {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
 /* ── Pulse highlight animation ──────────────────────────────── */
 @keyframes highlight-pulse {
   0%   { box-shadow: 0 0 0 0 var(--highlight-pulse); }

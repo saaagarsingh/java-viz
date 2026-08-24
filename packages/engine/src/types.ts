@@ -117,6 +117,9 @@ export type OperationType =
   | 'invokeinterface'
   | 'invokespecial'       // constructor / super calls
   | 'new_object'
+  | 'array_create'
+  | 'array_load'
+  | 'array_store'
   | 'putfield'
   | 'getfield'
   | 'putstatic'

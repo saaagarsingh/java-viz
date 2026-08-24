@@ -83,6 +83,7 @@ export type JavaType =
   | { kind: 'boolean'}
   | { kind: 'char'   }
   | { kind: 'String' }            // modeled as a value, not a heap KlassInfo
+  | { kind: 'array'; elementType: JavaType }
   | { kind: 'ref'; className: string };
 
 export const VOID_TYPE:    JavaType = { kind: 'void' };
@@ -99,6 +100,7 @@ export type Statement =
   | ReturnStmt
   | IfStmt
   | ForStmt
+  | EnhancedForStmt
   | WhileStmt
   | BlockStmt
   | BreakStmt
@@ -149,6 +151,14 @@ export interface WhileStmt {
   loc:       SourceLoc;
 }
 
+export interface EnhancedForStmt {
+  kind:       'EnhancedForStmt';
+  variable:   { name: string; type: JavaType };
+  iterable:   Expr;
+  body:       Statement[];
+  loc:        SourceLoc;
+}
+
 export interface BlockStmt {
   kind:       'BlockStmt';
   statements: Statement[];
@@ -191,6 +201,10 @@ export type Expr =
   | StaticMethodCallExpr
   | SuperCallExpr
   | NewObjectExpr
+  | NewArrayExpr
+  | ArrayInitializerExpr
+  | ArrayAccessExpr
+  | ArrayLengthExpr
   | AssignExpr
   | CompoundAssignExpr
   | BinaryExpr
@@ -266,10 +280,36 @@ export interface NewObjectExpr {
   loc:       SourceLoc;
 }
 
+export interface NewArrayExpr {
+  kind:        'NewArrayExpr';
+  elementType: JavaType;
+  dimensions:  Expr[];
+  loc:         SourceLoc;
+}
+
+export interface ArrayInitializerExpr {
+  kind:     'ArrayInitializerExpr';
+  elements: Expr[];
+  loc:      SourceLoc;
+}
+
+export interface ArrayAccessExpr {
+  kind:  'ArrayAccessExpr';
+  array: Expr;
+  index: Expr;
+  loc:   SourceLoc;
+}
+
+export interface ArrayLengthExpr {
+  kind:  'ArrayLengthExpr';
+  array: Expr;
+  loc:   SourceLoc;
+}
+
 /** Simple assignment: `target = value` */
 export interface AssignExpr {
   kind:   'AssignExpr';
-  target: VarExpr | FieldAccessExpr | StaticFieldAccessExpr;
+  target: VarExpr | FieldAccessExpr | StaticFieldAccessExpr | ArrayAccessExpr;
   value:  Expr;
   loc:    SourceLoc;
 }
@@ -278,7 +318,7 @@ export interface AssignExpr {
 export interface CompoundAssignExpr {
   kind:   'CompoundAssignExpr';
   op:     '+=' | '-=' | '*=' | '/=' | '%=';
-  target: VarExpr | FieldAccessExpr | StaticFieldAccessExpr;
+  target: VarExpr | FieldAccessExpr | StaticFieldAccessExpr | ArrayAccessExpr;
   value:  Expr;
   loc:    SourceLoc;
 }

@@ -5,6 +5,7 @@ import { vtableDispatch }              from './03-vtable-dispatch.js';
 import { invokeStatic }                from './04-invokestatic.js';
 import { invokeInterface }             from './05-invokeinterface.js';
 import { constructorPolymorphismTrap } from './06-constructor-polymorphism-trap.js';
+import { arraysAndEnhancedFor }        from './07-arrays-and-enhanced-for.js';
 
 export interface TraceEntry {
   id:          string;
@@ -173,5 +174,29 @@ export const traces: TraceEntry[] = [
       '}',
     ].join('\n'),
     steps:       constructorPolymorphismTrap,
+  },
+  {
+    id:          '07-arrays-and-enhanced-for',
+    title:       'Arrays & Enhanced For Loop',
+    description: 'Array allocation, indexing, length, element mutation, and enhanced for iteration.',
+    sourceCode: [
+      'class Main {',
+      '  static void main() {',
+      '    int[] numbers = {10, 20, 30, 40, 50};',
+      '    numbers[1] = 25;',
+      '    int second = numbers[1];',
+      '    int len = numbers.length;',
+      '    ',
+      '    int sum = 0;',
+      '    for (int n : numbers) {',
+      '      sum = sum + n;',
+      '    }',
+      '    ',
+      '    System.out.println("second=" + second);',
+      '    System.out.println("sum=" + sum);',
+      '  }',
+      '}',
+    ].join('\n'),
+    steps:       arraysAndEnhancedFor,
   },
 ];

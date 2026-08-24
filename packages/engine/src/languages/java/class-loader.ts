@@ -252,6 +252,7 @@ export function defaultValue(type: { kind: string }): Value {
     case 'boolean': return { kind: 'boolean', value: false };
     case 'char':    return { kind: 'char',    value: '\0' };
     case 'String':  return { kind: 'null' };
+    case 'array':   return { kind: 'null' };
     case 'ref':     return { kind: 'null' };
     case 'void':    return { kind: 'uninitialized' };
     default:        return { kind: 'uninitialized' };
@@ -276,6 +277,7 @@ function typeDescriptor(type: { kind: string; className?: string }): string {
     case 'boolean': return 'Z';
     case 'char':    return 'C';
     case 'String':  return 'Ljava/lang/String;';
+    case 'array':   return `[${typeDescriptor((type as any).elementType ?? { kind: 'ref', className: 'Object' })}`;
     case 'ref':     return `L${(type as any).className};`;
     default:        return 'Ljava/lang/Object;';
   }

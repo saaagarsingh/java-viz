@@ -19,10 +19,10 @@ import { parse as javaParserParse } from 'java-parser';
 import type {
   Program, ClassDecl, FieldDecl, ConstructorDecl, MethodDecl, ParamDecl,
   Statement, Expr, JavaType, SourceLoc,
-  LocalVarDecl, ExprStmt, ReturnStmt, IfStmt, ForStmt, WhileStmt,
+  LocalVarDecl, ExprStmt, ReturnStmt, IfStmt, ForStmt, EnhancedForStmt, WhileStmt,
   BreakStmt, ContinueStmt, SynchronizedStmt,
   BinaryOp, UnaryOp,
-  VarExpr, FieldAccessExpr, StaticFieldAccessExpr,
+  VarExpr, FieldAccessExpr, StaticFieldAccessExpr, ArrayAccessExpr,
 } from './ast.js';
 
 // ── Error type ────────────────────────────────────────────────────────────────
@@ -96,6 +96,20 @@ function collectTokenImages(node: any, acc: string[] = []): string[] {
     if (!Array.isArray(arr)) continue;
     for (const childNode of arr) {
       collectTokenImages(childNode, acc);
+    }
+  }
+  return acc;
+}
+
+function collectRuleNodes(node: any, ruleName: string, acc: any[] = []): any[] {
+  if (!node || typeof node !== 'object') return acc;
+  if (node.name === ruleName) acc.push(node);
+  const kids = node.children ?? {};
+  for (const key of Object.keys(kids)) {
+    const arr = kids[key];
+    if (!Array.isArray(arr)) continue;
+    for (const childNode of arr) {
+      collectRuleNodes(childNode, ruleName, acc);
     }
   }
   return acc;
@@ -438,12 +452,8 @@ function transformFormalParams(node: any, opts?: { allowMainStringArrayParam?: b
     // java-parser wraps the param in variableParaRegularParameter
     const reg       = child(fp, 'variableParaRegularParameter') ?? fp;
     const unannType = child(reg, 'unannType');
-    if (hasArrayDims(unannType)) {
-      const typeName = extractTypeName(unannType);
-      // Phase 1 compatibility exception: accept main(String[] args) by
-      // dropping the arg param because array values are not modeled yet.
-      if (opts?.allowMainStringArrayParam && typeName === 'String') continue;
-      throw new UnsupportedError('array parameters (Phase 5)', loc(unannType ?? reg).line);
+    if (hasArrayDims(unannType) && opts?.allowMainStringArrayParam) {
+      // Keep main(String[] args) and treat it as a normal array param in Phase 5.
     }
     const type = transformType(unannType);
     const id   = child(reg, 'variableDeclaratorId');
@@ -576,10 +586,10 @@ function transformWhile(node: any): WhileStmt {
   return { kind: 'WhileStmt', condition: cond, body, loc: loc(node) };
 }
 
-function transformFor(node: any): ForStmt {
+function transformFor(node: any): ForStmt | EnhancedForStmt {
   const basic = child(node, 'basicForStatement') ?? child(node, 'basicForStatementNoShortIf');
   const enhanced = child(node, 'enhancedForStatement');
-  if (enhanced) throw new UnsupportedError('enhanced for loop (Phase 5)', loc(enhanced).line);
+  if (enhanced) return transformEnhancedFor(enhanced);
   if (!basic) throw new ParseError('Unrecognised for statement');
 
   // init
@@ -614,6 +624,35 @@ function transformFor(node: any): ForStmt {
 
   const body = transformBlock_or_stmt(child(basic, 'statement'));
   return { kind: 'ForStmt', init, condition, update, body, loc: loc(node) };
+}
+
+function transformEnhancedFor(node: any): EnhancedForStmt {
+  const localDecl = child(node, 'localVariableDeclaration');
+  if (!localDecl) throw new ParseError(`Malformed enhanced for-loop at line ${loc(node).line}`);
+
+  const variableType = transformType(child(localDecl, 'localVariableType') ?? child(localDecl, 'unannType'));
+  const varDecls = children(localDecl, 'variableDeclaratorList')
+    .flatMap((vdl: any) => children(vdl, 'variableDeclarator'));
+  if (varDecls.length !== 1) {
+    throw new UnsupportedError('enhanced for variable declaration list', loc(localDecl).line);
+  }
+
+  const varId = child(varDecls[0], 'variableDeclaratorId');
+  const variableName = tokenImage(varId, 'Identifier') ?? '';
+  const iterableNode = child(node, 'expression');
+  if (!iterableNode) throw new ParseError(`Enhanced for-loop missing iterable expression at line ${loc(node).line}`);
+  const iterable = transformExpr(iterableNode);
+
+  const bodyNode = child(node, 'statement');
+  const body = bodyNode ? transformBlock_or_stmt(bodyNode) : [];
+
+  return {
+    kind: 'EnhancedForStmt',
+    variable: { name: variableName, type: variableType },
+    iterable,
+    body,
+    loc: loc(node),
+  };
 }
 
 
@@ -703,6 +742,8 @@ function transformExpr(node: any): Expr {
       return transformUnaryExpr(node);
     case 'primary':
       return transformPrimary(node);
+    case 'arrayInitializer':
+      return transformArrayInitializer(node);
   }
 
   // Single-child unwrap (handles: variableInitializer, localVariableType, etc.)
@@ -815,10 +856,10 @@ function transformBinaryExpr(node: any): Expr {
 
 function buildAssignment(lhs: Expr, opImg: string, rhs: Expr, nodeLoc: SourceLoc): Expr {
   // LHS must be a valid assignment target
-  if (!['VarExpr','FieldAccessExpr','StaticFieldAccessExpr'].includes(lhs.kind)) {
+  if (!['VarExpr','FieldAccessExpr','StaticFieldAccessExpr','ArrayAccessExpr'].includes(lhs.kind)) {
     throw new ParseError(`Invalid assignment target "${lhs.kind}" at line ${nodeLoc.line}`);
   }
-  const target = lhs as VarExpr | FieldAccessExpr | StaticFieldAccessExpr;
+  const target = lhs as VarExpr | FieldAccessExpr | StaticFieldAccessExpr | ArrayAccessExpr;
   if (opImg === '=') return { kind: 'AssignExpr', target, value: rhs, loc: nodeLoc };
   const compMap: Record<string, string> = {
     '+=':'+=', '-=':'-=', '*=':'*=', '/=':'/=', '%=':'%=',
@@ -837,16 +878,17 @@ function transformUnaryExpr(node: any): Expr {
 
   const c       = node.children ?? {};
   const nodeLoc = loc(node);
+  const unaryPrefixImg = c.UnaryPrefixOperator?.[0]?.image as string | undefined;
 
   // Prefix operators (token keys: Not, Minus, Plus)
-  if (c.Not?.length) {
+  if (c.Not?.length || unaryPrefixImg === '!') {
     return { kind: 'UnaryExpr', op: '!', operand: transformPrimary(c.primary?.[0]), prefix: true, loc: nodeLoc };
   }
-  if (c.Minus?.length) {
+  if (c.Minus?.length || unaryPrefixImg === '-') {
     const inner = c.primary?.[0] ?? c.unaryExpression?.[0];
     return { kind: 'UnaryExpr', op: '-', operand: transformExpr(inner), prefix: true, loc: nodeLoc };
   }
-  if (c.Plus?.length) {
+  if (c.Plus?.length || unaryPrefixImg === '+') {
     const inner = c.primary?.[0] ?? c.unaryExpression?.[0];
     return transformExpr(inner); // unary + is a no-op
   }
@@ -959,6 +1001,23 @@ function transformPrimary(node: any): Expr {
 
     } else {
       // ── Dot + Identifier suffix ───────────────────────────────────────────
+      if (sc.arrayAccessSuffix?.length) {
+        if (fqnParts !== null) {
+          base = buildExprFromFqn(fqnParts, nodeLoc);
+          fqnParts = null;
+        }
+        const arrSuffix = sc.arrayAccessSuffix[0];
+        const indexNode = child(arrSuffix, 'expression');
+        if (!indexNode) throw new ParseError(`Array access missing index at line ${loc(arrSuffix).line}`);
+        base = {
+          kind: 'ArrayAccessExpr',
+          array: base!,
+          index: transformExpr(indexNode),
+          loc: loc(arrSuffix),
+        };
+        continue;
+      }
+
       const ident = sc.Identifier?.[0]?.image as string | undefined;
       if (!ident) continue; // skip unexpected suffix shapes
 
@@ -975,8 +1034,12 @@ function transformPrimary(node: any): Expr {
         // This identifier is a method name — save it, args come in next iteration
         pendingMethodName = ident;
       } else {
-        // Regular field access
-        base = { kind: 'FieldAccessExpr', object: base!, field: ident, loc: loc(suffix) };
+        // Regular field access / special-case array length
+        if (ident === 'length') {
+          base = { kind: 'ArrayLengthExpr', array: base!, loc: loc(suffix) };
+        } else {
+          base = { kind: 'FieldAccessExpr', object: base!, field: ident, loc: loc(suffix) };
+        }
       }
     }
   }
@@ -1071,6 +1134,12 @@ function buildExprFromFqn(parts: string[], nodeLoc: SourceLoc): Expr {
   if (parts.length === 0) throw new ParseError('Empty FQN');
   if (parts.length === 1) return { kind: 'VarExpr', name: parts[0]!, loc: nodeLoc };
 
+  if (parts.length >= 2 && parts[parts.length - 1] === 'length') {
+    const targetParts = parts.slice(0, -1);
+    const arrayExpr = buildExprFromFqn(targetParts, nodeLoc);
+    return { kind: 'ArrayLengthExpr', array: arrayExpr, loc: nodeLoc };
+  }
+
   const field     = parts[parts.length - 1]!;
   const qualParts = parts.slice(0, -1);
 
@@ -1115,6 +1184,9 @@ function transformLiteralNode(literalNode: any): Expr {
 // Called when we see primaryPrefix → newExpression.
 
 function transformNewExpr(newExprNode: any): Expr {
+  const arr = child(newExprNode, 'arrayCreationExpression');
+  if (arr) return transformArrayCreationExpr(arr);
+
   const uq = child(newExprNode, 'unqualifiedClassInstanceCreationExpression');
   if (!uq) throw new UnsupportedError('qualified new expression', loc(newExprNode).line);
   if (child(uq, 'classBody')) throw new UnsupportedError('anonymous class (Phase 6)', loc(uq).line);
@@ -1126,6 +1198,43 @@ function transformNewExpr(newExprNode: any): Expr {
   const argList = child(uq, 'argumentList');
   const args    = argList ? children(argList, 'expression').map(transformExpr) : [];
   return { kind: 'NewObjectExpr', className, args, loc: loc(uq) };
+}
+
+function transformArrayInitializer(node: any): Expr {
+  const list = child(node, 'variableInitializerList');
+  const entries = list ? children(list, 'variableInitializer') : [];
+  const elements = entries.map((entry: any) => {
+    const exprNode = child(entry, 'expression');
+    if (exprNode) return transformExpr(exprNode);
+    const nestedInit = child(entry, 'arrayInitializer');
+    if (nestedInit) return transformArrayInitializer(nestedInit);
+    throw new ParseError(`Unsupported array initializer element at line ${loc(entry).line}`);
+  });
+  return { kind: 'ArrayInitializerExpr', elements, loc: loc(node) };
+}
+
+function transformArrayCreationExpr(node: any): Expr {
+  const primitive = child(node, 'primitiveType');
+  const classOrIface = child(node, 'classOrInterfaceType');
+  const refType = child(node, 'referenceType');
+  const typeToCreate = primitive ?? classOrIface ?? refType ?? child(node, 'typeToInstantiate') ?? node;
+
+  const dimExprs: Expr[] = [];
+  const dimExprNodes = collectRuleNodes(node, 'dimExpr');
+  for (const d of dimExprNodes) {
+    const e = child(d, 'expression');
+    if (e) dimExprs.push(transformExpr(e));
+  }
+
+  const explicitDims = dimExprs.length > 0 ? dimExprs.length : countDims(node);
+  const elementType = makeArrayElementType(typeToCreate, explicitDims === 0 ? 1 : explicitDims);
+
+  return {
+    kind: 'NewArrayExpr',
+    elementType,
+    dimensions: dimExprs,
+    loc: loc(node),
+  };
 }
 
 // ── Literals (raw token → Expr) ───────────────────────────────────────────────
@@ -1192,12 +1301,75 @@ function parseStringLiteral(raw: string): string {
 
 // ── Type transformer ──────────────────────────────────────────────────────────
 
+function countDims(node: any): number {
+  if (!node || typeof node !== 'object' || node.image !== undefined) return 0;
+  const directDims = child(node, 'dims');
+  if (directDims) {
+    const l = children(directDims, 'LSquare').length;
+    const r = children(directDims, 'RSquare').length;
+    return Math.max(l, r, l > 0 || r > 0 ? 1 : 0);
+  }
+  let found = 0;
+  for (const arr of Object.values(node.children ?? {})) {
+    if (!Array.isArray(arr)) continue;
+    for (const item of arr) {
+      found = Math.max(found, countDims(item));
+    }
+  }
+  return found;
+}
+
+function wrapArrayDims(base: JavaType, dims: number): JavaType {
+  let t = base;
+  for (let i = 0; i < dims; i++) {
+    t = { kind: 'array', elementType: t };
+  }
+  return t;
+}
+
+function makeArrayElementType(typeNode: any, dimsInCreation: number): JavaType {
+  const baseType = transformType(typeNode);
+  // new int[5] => NewArrayExpr.elementType = int
+  // new int[5][3] => elementType should be int[]
+  return dimsInCreation > 1 ? wrapArrayDims(baseType, dimsInCreation - 1) : baseType;
+}
+
 function transformType(node: any): JavaType {
   if (!node) return { kind: 'void' };
 
-  // Check for array type
-  if (children(node, 'dims').length > 0 || node.children?.dims) {
-    throw new UnsupportedError('arrays (Phase 5)', loc(node).line);
+  // Array wrapper nodes from java-parser:
+  // - unannPrimitiveTypeWithOptionalDimsSuffix (primitive arrays)
+  // - unannReferenceType + dims (reference arrays)
+  // - any type node with a nested dims child
+  const primWithDims = child(node, 'unannPrimitiveTypeWithOptionalDimsSuffix');
+  if (primWithDims) {
+    const primitive = child(primWithDims, 'unannPrimitiveType') ?? primWithDims;
+    const base = transformType(primitive);
+    const dims = countDims(primWithDims);
+    return dims > 0 ? wrapArrayDims(base, dims) : base;
+  }
+
+  const unannRef = child(node, 'unannReferenceType');
+  if (unannRef && countDims(unannRef) > 0) {
+    const classish = child(unannRef, 'unannClassOrInterfaceType') ?? child(unannRef, 'unannTypeVariable') ?? unannRef;
+    const base = transformType(classish);
+    return wrapArrayDims(base, countDims(unannRef));
+  }
+
+  const directDims = countDims(node);
+  if (directDims > 0) {
+    const keys = Object.keys(node.children ?? {}).filter(k => k !== 'dims');
+    for (const key of keys) {
+      const arr = node.children?.[key];
+      if (Array.isArray(arr) && arr.length > 0) {
+        const base = transformType(arr[0]);
+        // BUGFIX: don't double-wrap if base is already an array type that consumed its own dims
+        if (base.kind === 'array') {
+          return base;
+        }
+        return wrapArrayDims(base, directDims);
+      }
+    }
   }
 
   // Primitives

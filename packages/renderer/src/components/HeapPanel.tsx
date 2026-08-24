@@ -2,6 +2,8 @@ import { useState } from 'react';
 import type { HeapObject, HighlightTarget, Arrow, MarkWordState } from '@jvm-viz/engine';
 import { formatValue } from '../utils/formatValue.js';
 
+const ARRAY_PAGE_SIZE = 12;
+
 interface Props {
   objects:         HeapObject[];
   highlights:      HighlightTarget[];
@@ -53,8 +55,30 @@ function activeHeapIds(arrows: Arrow[], highlights: HighlightTarget[]): Set<stri
   return ids;
 }
 
+interface ArrayElementField {
+  index: number;
+  field: HeapObject['fields'][number];
+}
+
+function parseArrayObject(obj: HeapObject): { length: number; elements: ArrayElementField[] } | null {
+  const lengthField = obj.fields.find((f) => f.name === 'length');
+  if (!lengthField) return null;
+  if (lengthField.value.kind !== 'int') return null;
+
+  const elements: ArrayElementField[] = [];
+  for (const field of obj.fields) {
+    const match = field.name.match(/^\[(\d+)\]$/);
+    if (!match) continue;
+    elements.push({ index: Number(match[1]), field });
+  }
+  if (elements.length === 0) return null;
+  elements.sort((a, b) => a.index - b.index);
+  return { length: lengthField.value.value, elements };
+}
+
 export function HeapPanel({ objects, highlights, arrows, monitorObjectId, showHeapRefArrows = false, focusedObjectId = null, onRevealReference }: Props) {
   const [openOverrides, setOpenOverrides] = useState<Record<string, boolean>>({});
+  const [arrayPageByObject, setArrayPageByObject] = useState<Record<string, number>>({});
   const objectLabels = new Map<string, string>(
     objects.map(o => [o.objectId, `${o.klassName}#${o.objectId.replace(/^obj-/, '')}`])
   );
@@ -76,6 +100,15 @@ export function HeapPanel({ objects, highlights, arrows, monitorObjectId, showHe
     setOpenOverrides(prev => ({ ...prev, [objectId]: !isOpen(objectId) }));
   }
 
+  function currentArrayPage(objectId: string): number {
+    return arrayPageByObject[objectId] ?? 0;
+  }
+
+  function setArrayPage(objectId: string, next: number, maxPages: number) {
+    const clamped = Math.max(0, Math.min(next, Math.max(0, maxPages - 1)));
+    setArrayPageByObject((prev) => ({ ...prev, [objectId]: clamped }));
+  }
+
   return (
     <>
       {!showHeapRefArrows && (
@@ -86,6 +119,7 @@ export function HeapPanel({ objects, highlights, arrows, monitorObjectId, showHe
       {objects.map(obj => {
         const highlighted = isHighlighted(highlights, obj.objectId);
         const expanded    = isOpen(obj.objectId);
+        const arrayInfo = parseArrayObject(obj);
         return (
           <div
             key={obj.objectId}
@@ -115,44 +149,117 @@ export function HeapPanel({ objects, highlights, arrows, monitorObjectId, showHe
 
             {expanded && obj.fields.length > 0 && (
               <div className="heap-card__body">
-                {obj.fields.map(field => {
-                  const fmted = formatValue(field.value, { objectLabels, refDisplay: 'compact' });
-                  const fieldHighlighted = isHighlighted(highlights, obj.objectId, field.name);
-                  const refTargetId = field.value.kind === 'ref' ? field.value.objectId : null;
-                  return (
-                    <div
-                      key={`${field.declaredIn}.${field.name}`}
-                      id={`field-${obj.objectId}-${field.name}`}
-                      className={`field-row${fieldHighlighted ? ' is-highlighted-field' : ''}`}
-                    >
-                      <span className="field-row__name">
-                        {field.isVolatile && (
-                          <span className="volatile-badge" title="volatile — always read from/written to main memory">
-                            volatile
-                          </span>
+                {arrayInfo ? (
+                  (() => {
+                    const total = arrayInfo.elements.length;
+                    const maxPages = Math.max(1, Math.ceil(total / ARRAY_PAGE_SIZE));
+                    const page = Math.min(currentArrayPage(obj.objectId), maxPages - 1);
+                    const start = page * ARRAY_PAGE_SIZE;
+                    const end = Math.min(start + ARRAY_PAGE_SIZE, total);
+                    const visible = arrayInfo.elements.slice(start, end);
+
+                    return (
+                      <>
+                        <div className="array-card__meta">
+                          <span>length={arrayInfo.length}</span>
+                          {total > ARRAY_PAGE_SIZE && (
+                            <span className="array-card__meta-range">slots {start + 1}-{end} of {total}</span>
+                          )}
+                        </div>
+
+                        {visible.map(({ index, field }) => {
+                          const fmted = formatValue(field.value, { objectLabels, refDisplay: 'compact' });
+                          const fieldHighlighted = isHighlighted(highlights, obj.objectId, field.name);
+                          const refTargetId = field.value.kind === 'ref' ? field.value.objectId : null;
+                          return (
+                            <div
+                              key={`${field.declaredIn}.${field.name}`}
+                              id={`field-${obj.objectId}-${field.name}`}
+                              className={`field-row${fieldHighlighted ? ' is-highlighted-field' : ''}`}
+                            >
+                              <span className="field-row__name array-card__index">[{index}]</span>
+                              {refTargetId ? (
+                                <button
+                                  type="button"
+                                  className={`field-row__value field-row__value--ref field-row__value--refbtn`}
+                                  onClick={() => onRevealReference?.(obj.objectId, field.name, refTargetId)}
+                                  title={`Click to reveal reference edge for [${index}]`}
+                                >
+                                  {fmted.text}
+                                </button>
+                              ) : (
+                                <span className={`field-row__value ${fmted.cls}`}>{fmted.text}</span>
+                              )}
+                            </div>
+                          );
+                        })}
+
+                        {total > ARRAY_PAGE_SIZE && (
+                          <div className="array-card__pager">
+                            <button
+                              type="button"
+                              className="array-card__pager-btn"
+                              onClick={() => setArrayPage(obj.objectId, page - 1, maxPages)}
+                              disabled={page === 0}
+                              aria-label="Previous array page"
+                            >
+                              Prev
+                            </button>
+                            <span className="array-card__pager-text">Page {page + 1} / {maxPages}</span>
+                            <button
+                              type="button"
+                              className="array-card__pager-btn"
+                              onClick={() => setArrayPage(obj.objectId, page + 1, maxPages)}
+                              disabled={page >= maxPages - 1}
+                              aria-label="Next array page"
+                            >
+                              Next
+                            </button>
+                          </div>
                         )}
-                        {field.name}
-                        {field.declaredIn !== obj.klassName && (
-                          <span style={{ color: 'var(--text-muted)', fontSize: '10px', marginLeft: 4 }}>
-                            ({field.declaredIn})
-                          </span>
+                      </>
+                    );
+                  })()
+                ) : (
+                  obj.fields.map(field => {
+                    const fmted = formatValue(field.value, { objectLabels, refDisplay: 'compact' });
+                    const fieldHighlighted = isHighlighted(highlights, obj.objectId, field.name);
+                    const refTargetId = field.value.kind === 'ref' ? field.value.objectId : null;
+                    return (
+                      <div
+                        key={`${field.declaredIn}.${field.name}`}
+                        id={`field-${obj.objectId}-${field.name}`}
+                        className={`field-row${fieldHighlighted ? ' is-highlighted-field' : ''}`}
+                      >
+                        <span className="field-row__name">
+                          {field.isVolatile && (
+                            <span className="volatile-badge" title="volatile — always read from/written to main memory">
+                              volatile
+                            </span>
+                          )}
+                          {field.name}
+                          {field.declaredIn !== obj.klassName && (
+                            <span style={{ color: 'var(--text-muted)', fontSize: '10px', marginLeft: 4 }}>
+                              ({field.declaredIn})
+                            </span>
+                          )}
+                        </span>
+                        {refTargetId ? (
+                          <button
+                            type="button"
+                            className={`field-row__value field-row__value--ref field-row__value--refbtn`}
+                            onClick={() => onRevealReference?.(obj.objectId, field.name, refTargetId)}
+                            title={`Click to reveal reference edge for ${field.name}`}
+                          >
+                            {fmted.text}
+                          </button>
+                        ) : (
+                          <span className={`field-row__value ${fmted.cls}`}>{fmted.text}</span>
                         )}
-                      </span>
-                      {refTargetId ? (
-                        <button
-                          type="button"
-                          className={`field-row__value field-row__value--ref field-row__value--refbtn`}
-                          onClick={() => onRevealReference?.(obj.objectId, field.name, refTargetId)}
-                          title={`Click to reveal reference edge for ${field.name}`}
-                        >
-                          {fmted.text}
-                        </button>
-                      ) : (
-                        <span className={`field-row__value ${fmted.cls}`}>{fmted.text}</span>
-                      )}
-                    </div>
-                  );
-                })}
+                      </div>
+                    );
+                  })
+                )}
               </div>
             )}
           </div>

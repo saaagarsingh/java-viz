@@ -11,6 +11,7 @@
     "smoke:thread-session": "tsx src/languages/java/thread-session-smoke.ts",
     "test:thread-locks": "tsx src/languages/java/thread-lock-behavior-test.ts",
     "test:thread-many-workers": "tsx src/languages/java/thread-many-workers-test.ts",
+    "test:phase5-arrays": "tsx src/languages/java/phase5-arrays-test.ts",
     "analyze:thread-parser": "tsx src/languages/java/thread-parser-sweep.ts",
     "smoke:thread-java-api": "tsx src/languages/java/thread-java-api-smoke.ts"
   },

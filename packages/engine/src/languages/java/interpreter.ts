@@ -23,7 +23,7 @@ import type {
 } from '../../types.js';
 import type {
   Program, ClassDecl, MethodDecl, ConstructorDecl,
-  Statement, Expr, SourceLoc,
+  Statement, Expr, JavaType, SourceLoc,
 } from './ast.js';
 import type { LoadedClasses }  from './class-loader.js';
 import { loadClasses, defaultValue } from './class-loader.js';
@@ -473,7 +473,17 @@ export class JavaInterpreter {
 
     switch (stmt.kind) {
       case 'LocalVarDecl': {
-        const value = stmt.initializer ? this.evalExpr(stmt.initializer) : defaultValue(stmt.type);
+        let value: Value;
+        if (!stmt.initializer) {
+          value = defaultValue(stmt.type);
+        } else if (stmt.initializer.kind === 'ArrayInitializerExpr') {
+          if (stmt.type.kind !== 'array') {
+            throw new InterpreterHalt({ kind: 'runtime_error', message: `Array initializer requires array-typed local ${stmt.name} (line ${stmt.loc.line})` });
+          }
+          value = this.evalArrayInitializerForType(stmt.initializer, stmt.type, stmt.loc);
+        } else {
+          value = this.evalExpr(stmt.initializer);
+        }
         this.setLocal(stmt.name, value);
         break;
       }
@@ -531,6 +541,10 @@ export class JavaInterpreter {
             throw e;
           }
         }
+        break;
+      }
+      case 'EnhancedForStmt': {
+        this.executeEnhancedFor(stmt, lineHint);
         break;
       }
       case 'BreakStmt':
@@ -617,6 +631,18 @@ export class JavaInterpreter {
       case 'NewObjectExpr':
         return this.evalNew(expr);
 
+      case 'NewArrayExpr':
+        return this.evalNewArray(expr);
+
+      case 'ArrayInitializerExpr':
+        throw new InterpreterHalt({ kind: 'runtime_error', message: `Array initializer cannot be evaluated without target type context (line ${expr.loc.line})` });
+
+      case 'ArrayAccessExpr':
+        return this.evalArrayAccess(expr);
+
+      case 'ArrayLengthExpr':
+        return this.evalArrayLength(expr);
+
       case 'MethodCallExpr':
         return this.evalMethodCall(expr);
 
@@ -629,6 +655,8 @@ export class JavaInterpreter {
       case 'PrintlnExpr':
         return this.evalPrintln(expr);
     }
+
+    throw new InterpreterHalt({ kind: 'runtime_error', message: `Unsupported expression kind: ${(expr as { kind: string }).kind}` });
   }
 
   // ── new ────────────────────────────────────────────────────────────────────
@@ -1059,6 +1087,271 @@ export class JavaInterpreter {
     return { kind: 'uninitialized' };
   }
 
+  // ── Arrays (Phase 5) ──────────────────────────────────────────────────────
+
+  private executeEnhancedFor(stmt: Extract<Statement, { kind: 'EnhancedForStmt' }>, lineHint: number | null) {
+    const iterable = this.evalExpr(stmt.iterable);
+    const arrObj = this.expectArrayObject(iterable, stmt.loc);
+    const length = this.arrayLength(arrObj, stmt.loc);
+
+    const frame = this.topFrame();
+    const hadExisting = !!frame?.locals.has(stmt.variable.name);
+    const prevValue = hadExisting ? frame?.locals.get(stmt.variable.name) : undefined;
+
+    let iters = 0;
+    try {
+      for (let i = 0; i < length; i++) {
+        if (++iters > LIMITS.MAX_LOOP_ITERS) {
+          throw new InterpreterHalt({ kind: 'step_limit', limit: LIMITS.MAX_LOOP_ITERS });
+        }
+        const element = this.getArrayElement(iterable, { kind: 'int', value: i }, stmt.loc);
+        this.setLocal(stmt.variable.name, element);
+        try {
+          this.executeStatements(stmt.body, lineHint);
+        } catch (e) {
+          if (e instanceof ContinueSignal) continue;
+          if (e instanceof BreakSignal) break;
+          throw e;
+        }
+      }
+    } finally {
+      const cur = this.topFrame();
+      if (!cur) return;
+      if (hadExisting && prevValue) cur.locals.set(stmt.variable.name, prevValue);
+      else cur.locals.delete(stmt.variable.name);
+    }
+  }
+
+  private evalNewArray(expr: Extract<Expr, { kind: 'NewArrayExpr' }>): Value {
+    if (expr.dimensions.length === 0) {
+      throw new InterpreterHalt({ kind: 'runtime_error', message: `Array allocation requires at least one dimension (line ${expr.loc.line})` });
+    }
+
+    const dims = expr.dimensions.map((d) => {
+      const v = this.evalExpr(d);
+      const n = this.toNumber(v, expr.loc);
+      if (!Number.isInteger(n)) {
+        throw new InterpreterHalt({ kind: 'runtime_error', message: `Array size must be an integer (line ${expr.loc.line})` });
+      }
+      if (n < 0) {
+        throw new InterpreterHalt({ kind: 'runtime_error', message: `NegativeArraySizeException at line ${expr.loc.line}` });
+      }
+      return n;
+    });
+
+    const root = this.allocateArrayRecursive(expr.elementType, dims, expr.loc);
+
+    this.emitStep(expr.loc.line, {
+      operation: 'array_create',
+      description: `new ${this.arrayTypeName(expr.elementType)}[${dims.join('][')}]`,
+      highlightedElements: [{ region: 'heap', elementId: root.objectId }],
+      newArrows: [],
+      fadingArrows: [],
+    });
+
+    return { kind: 'ref', objectId: root.objectId };
+  }
+
+  private evalArrayInitializerForType(initExpr: Extract<Expr, { kind: 'ArrayInitializerExpr' }>, arrayType: JavaType, loc: SourceLoc): Value {
+    if (arrayType.kind !== 'array') {
+      throw new InterpreterHalt({ kind: 'runtime_error', message: `Array initializer requires array target type at line ${loc.line}` });
+    }
+
+    const root = this.createArrayObject(arrayType.elementType, initExpr.elements.length, loc);
+
+    for (let i = 0; i < initExpr.elements.length; i++) {
+      const elementExpr = initExpr.elements[i]!;
+      let value: Value;
+      if (elementExpr.kind === 'ArrayInitializerExpr') {
+        if (arrayType.elementType.kind !== 'array') {
+          throw new InterpreterHalt({ kind: 'runtime_error', message: `Nested array initializer depth mismatch at line ${elementExpr.loc.line}` });
+        }
+        value = this.evalArrayInitializerForType(elementExpr, arrayType.elementType, elementExpr.loc);
+      } else {
+        value = this.evalExpr(elementExpr);
+      }
+      this.setArrayElement({ kind: 'ref', objectId: root.objectId }, { kind: 'int', value: i }, value, loc);
+    }
+
+    this.emitStep(loc.line, {
+      operation: 'array_create',
+      description: `array literal create ${this.arrayTypeName(arrayType.elementType)}[${initExpr.elements.length}]`,
+      highlightedElements: [{ region: 'heap', elementId: root.objectId }],
+      newArrows: [],
+      fadingArrows: [],
+    });
+
+    return { kind: 'ref', objectId: root.objectId };
+  }
+
+  private evalArrayAccess(expr: Extract<Expr, { kind: 'ArrayAccessExpr' }>): Value {
+    const arrRef = this.evalExpr(expr.array);
+    const index = this.evalExpr(expr.index);
+    return this.getArrayElement(arrRef, index, expr.loc);
+  }
+
+  private evalArrayLength(expr: Extract<Expr, { kind: 'ArrayLengthExpr' }>): Value {
+    const arrRef = this.evalExpr(expr.array);
+    const obj = this.expectArrayObject(arrRef, expr.loc);
+    const len = this.arrayLength(obj, expr.loc);
+
+    this.emitStep(expr.loc.line, {
+      operation: 'array_load',
+      description: `array length = ${len}`,
+      highlightedElements: [{ region: 'heap', elementId: obj.objectId, fieldName: 'length' }],
+      newArrows: [],
+      fadingArrows: [],
+    });
+
+    return { kind: 'int', value: len };
+  }
+
+  private allocateArrayRecursive(elementType: JavaType, dims: number[], loc: SourceLoc): RuntimeObject {
+    const length = dims[0]!;
+    const obj = this.createArrayObject(elementType, length, loc);
+
+    if (dims.length > 1) {
+      const childElementType = elementType.kind === 'array' ? elementType.elementType : elementType;
+      for (let i = 0; i < length; i++) {
+        const child = this.allocateArrayRecursive(childElementType, dims.slice(1), loc);
+        obj.fields.set(this.arrayIndexKey(i), { kind: 'ref', objectId: child.objectId });
+      }
+    }
+
+    return obj;
+  }
+
+  private createArrayObject(elementType: JavaType, length: number, loc: SourceLoc): RuntimeObject {
+    if (this.heap.size >= LIMITS.MAX_HEAP_OBJECTS) {
+      throw new InterpreterHalt({ kind: 'out_of_memory', limit: LIMITS.MAX_HEAP_OBJECTS, objectCount: this.heap.size });
+    }
+
+    const objectId = `obj-${this.nextObjectId++}`;
+    const fields = new Map<string, Value>();
+    fields.set('length', { kind: 'int', value: length });
+
+    const defaultElement = defaultValue(elementType);
+    for (let i = 0; i < length; i++) {
+      fields.set(this.arrayIndexKey(i), this.cloneValue(defaultElement));
+    }
+
+    const obj: RuntimeObject = {
+      objectId,
+      klassName: this.arrayTypeName(elementType),
+      fields,
+    };
+
+    this.heap.set(objectId, obj);
+    return obj;
+  }
+
+  private arrayTypeName(elementType: JavaType): string {
+    switch (elementType.kind) {
+      case 'void': return 'void[]';
+      case 'int': return 'int[]';
+      case 'long': return 'long[]';
+      case 'double': return 'double[]';
+      case 'float': return 'float[]';
+      case 'boolean': return 'boolean[]';
+      case 'char': return 'char[]';
+      case 'String': return 'String[]';
+      case 'ref': return `${elementType.className}[]`;
+      case 'array': return `${this.arrayTypeName(elementType.elementType)}[]`;
+      default: return 'Object[]';
+    }
+  }
+
+  private arrayIndexKey(index: number): string {
+    return `[${index}]`;
+  }
+
+  private expectArrayObject(arrayRef: Value, loc: SourceLoc): RuntimeObject {
+    if (arrayRef.kind !== 'ref') {
+      throw new InterpreterHalt({ kind: 'null_pointer', className: '(primitive)', field: 'array access', line: loc.line });
+    }
+    const obj = this.heap.get(arrayRef.objectId);
+    if (!obj) {
+      throw new InterpreterHalt({ kind: 'null_pointer', className: '(null)', field: 'array access', line: loc.line });
+    }
+    if (!obj.fields.has('length')) {
+      throw new InterpreterHalt({ kind: 'runtime_error', message: `Value is not an array at line ${loc.line}` });
+    }
+    return obj;
+  }
+
+  private arrayLength(obj: RuntimeObject, loc: SourceLoc): number {
+    const lengthVal = obj.fields.get('length');
+    if (!lengthVal || lengthVal.kind !== 'int') {
+      throw new InterpreterHalt({ kind: 'runtime_error', message: `Malformed array length metadata at line ${loc.line}` });
+    }
+    return lengthVal.value;
+  }
+
+  private getArrayElement(arrayRef: Value, indexVal: Value, loc: SourceLoc): Value {
+    const obj = this.expectArrayObject(arrayRef, loc);
+    const length = this.arrayLength(obj, loc);
+    const idx = this.normalizeArrayIndex(indexVal, length, loc);
+    const key = this.arrayIndexKey(idx);
+    const value = obj.fields.get(key);
+    if (value === undefined) {
+      throw new InterpreterHalt({ kind: 'runtime_error', message: `Array slot ${idx} not initialized at line ${loc.line}` });
+    }
+
+    this.emitStep(loc.line, {
+      operation: 'array_load',
+      description: `array load ${obj.klassName}[${idx}] = ${this.valueToString(value)}`,
+      highlightedElements: [{ region: 'heap', elementId: obj.objectId, fieldName: key }],
+      newArrows: [],
+      fadingArrows: [],
+    });
+
+    return value;
+  }
+
+  private setArrayElement(arrayRef: Value, indexVal: Value, value: Value, loc: SourceLoc) {
+    const obj = this.expectArrayObject(arrayRef, loc);
+    const length = this.arrayLength(obj, loc);
+    const idx = this.normalizeArrayIndex(indexVal, length, loc);
+    const key = this.arrayIndexKey(idx);
+    obj.fields.set(key, value);
+
+
+    const arrowId = `arr-array-${obj.objectId}-${idx}`;
+    if (value.kind === 'ref') {
+      this.arrows = [
+        ...this.arrows.filter(a => a.id !== arrowId),
+        {
+          id: arrowId,
+          from: { region: 'heap', elementId: obj.objectId, fieldName: key },
+          to: { region: 'heap', elementId: value.objectId },
+          operation: 'array_store',
+          label: `[${idx}]`,
+        },
+      ];
+    } else {
+      this.arrows = this.arrows.filter(a => a.id !== arrowId);
+    }
+
+    this.emitStep(loc.line, {
+      operation: 'array_store',
+      description: `array store ${obj.klassName}[${idx}] = ${this.valueToString(value)}`,
+      highlightedElements: [{ region: 'heap', elementId: obj.objectId, fieldName: key }],
+      newArrows: value.kind === 'ref' ? [arrowId] : [],
+      fadingArrows: value.kind === 'ref' ? [] : [arrowId],
+    });
+  }
+
+  private normalizeArrayIndex(indexVal: Value, length: number, loc: SourceLoc): number {
+    const idx = this.toNumber(indexVal, loc);
+    if (!Number.isInteger(idx)) {
+      throw new InterpreterHalt({ kind: 'runtime_error', message: `Array index must be an integer at line ${loc.line}` });
+    }
+    if (idx < 0 || idx >= length) {
+      throw new InterpreterHalt({ kind: 'runtime_error', message: `ArrayIndexOutOfBoundsException: index ${idx}, length ${length} at line ${loc.line}` });
+    }
+    return idx;
+  }
+
   // ── Field access & mutation ────────────────────────────────────────────────
 
   private getField(objRef: Value, fieldName: string, loc: SourceLoc): Value {
@@ -1170,6 +1463,12 @@ export class JavaInterpreter {
       case 'StaticFieldAccessExpr':
         this.setStaticField(target.className, target.field, value, loc.line);
         break;
+      case 'ArrayAccessExpr': {
+        const arrRef = this.evalExpr(target.array);
+        const index = this.evalExpr(target.index);
+        this.setArrayElement(arrRef, index, value, loc);
+        break;
+      }
       default:
         throw new InterpreterHalt({ kind: 'runtime_error', message: `Cannot assign to ${(target as any).kind}` });
     }
@@ -1189,6 +1488,11 @@ export class JavaInterpreter {
         return this.getField(this.evalExpr(target.object), target.field, loc);
       case 'StaticFieldAccessExpr':
         return this.getStaticField(target.className, target.field, loc);
+      case 'ArrayAccessExpr': {
+        const arrRef = this.evalExpr(target.array);
+        const index = this.evalExpr(target.index);
+        return this.getArrayElement(arrRef, index, loc);
+      }
       default:
         throw new InterpreterHalt({ kind: 'runtime_error', message: `Cannot read LHS ${(target as any).kind}` });
     }
